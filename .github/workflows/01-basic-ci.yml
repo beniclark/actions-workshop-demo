@@ -1,0 +1,192 @@
+# =============================================================================
+# Workshop: Basic Workflow Syntax
+# =============================================================================
+# This workflow demonstrates the fundamental building blocks of GitHub Actions:
+# - Multiple trigger types (workflow_dispatch, push, pull_request)
+# - Job dependencies and execution order
+# - Caching, artifacts, and job summaries
+# - Context expressions and environment variables
+# =============================================================================
+
+name: "Basic CI"
+
+# -----------------------------------------------------------------------------
+# Triggers
+# Multiple events can trigger the same workflow
+# -----------------------------------------------------------------------------
+on:
+  # Manual trigger with configurable inputs
+  workflow_dispatch:
+    inputs:
+      log_level:
+        description: "Log verbosity level"
+        required: false
+        type: choice
+        options:
+          - info
+          - debug
+          - warning
+        default: info
+
+  # Automatic trigger on push to main
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+  # Automatic trigger on PRs targeting main
+  pull_request:
+    branches: [main]
+
+# -----------------------------------------------------------------------------
+# Permissions
+# Always follow the principle of least privilege
+# -----------------------------------------------------------------------------
+permissions:
+  contents: read
+
+# -----------------------------------------------------------------------------
+# Environment Variables
+# Available to ALL jobs and steps in this workflow
+# -----------------------------------------------------------------------------
+env:
+  APP_NAME: ${{ vars.APP_NAME }}
+  BUILD_CONFIG: release
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Lint
+  # First job in the pipeline — validates code quality
+  # ---------------------------------------------------------------------------
+  lint:
+    name: "Lint Code"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Display useful context information for debugging
+      - name: Display context information
+        run: |
+          echo "=== Workflow Context ==="
+          echo "Event:     ${{ github.event_name }}"
+          echo "Ref:       ${{ github.ref }}"
+          echo "SHA:       ${{ github.sha }}"
+          echo "Actor:     ${{ github.actor }}"
+          echo "App Name:  ${{ env.APP_NAME }}"
+          echo "Log Level: ${{ inputs.log_level || 'info' }}"
+
+      - name: Run linter
+        run: |
+          echo "Running linter checks..."
+          echo "Lint passed (placeholder)"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Build
+  # Depends on lint — only runs if lint succeeds
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build Application"
+    runs-on: [self-hosted, linux]
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Cache dependencies to speed up builds
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Build application
+        run: |
+          echo "Building ${{ env.APP_NAME }} (${{ env.BUILD_CONFIG }})..."
+          mkdir -p dist
+          cat > dist/build-info.txt <<EOF
+          App:    ${{ env.APP_NAME }}
+          Config: ${{ env.BUILD_CONFIG }}
+          SHA:    ${{ github.sha }}
+          Ref:    ${{ github.ref }}
+          Time:   $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          EOF
+          echo "Build complete"
+          cat dist/build-info.txt
+
+      # Upload build output for downstream jobs
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+          retention-days: 5
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Test
+  # Depends on build — downloads and verifies the build artifact
+  # ---------------------------------------------------------------------------
+  test:
+    name: "Run Tests"
+    runs-on: [self-hosted, linux]
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+
+      - name: Verify artifact
+        run: |
+          echo "Verifying build artifact..."
+          cat dist/build-info.txt
+          echo "Artifact verified"
+
+      - name: Run tests
+        run: |
+          echo "Running test suite..."
+          echo "All tests passed (placeholder)"
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Summary
+  # Runs after test completes — always runs, even on failure
+  # ---------------------------------------------------------------------------
+  summary:
+    name: "Pipeline Summary"
+    runs-on: [self-hosted, linux]
+    needs: test
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Pipeline Summary
+
+          | Property | Value |
+          |----------|-------|
+          | App | \`${{ env.APP_NAME }}\` |
+          | Ref | \`${{ github.ref }}\` |
+          | SHA | \`${{ github.sha }}\` |
+          | Status | \`${{ needs.test.result }}\` |
+          EOF

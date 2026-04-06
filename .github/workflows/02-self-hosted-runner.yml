@@ -1,0 +1,161 @@
+# =============================================================================
+# Workshop: Self-Hosted Runners
+# =============================================================================
+# This workflow demonstrates self-hosted runner capabilities:
+# - Runner information and diagnostics
+# - Label-based routing strategies
+# - Container jobs on self-hosted runners
+# - Security best practices
+# =============================================================================
+
+name: "Self-Hosted Runner Demo"
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: "Optional custom runner label"
+        required: false
+        type: string
+      run_diagnostics:
+        description: "Run environment diagnostics"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Standard Runner
+  # Shows runner info and optional diagnostics
+  # ---------------------------------------------------------------------------
+  standard-runner:
+    name: "Standard Runner Info"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Runner information
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Runner Information
+
+          | Property | Value |
+          |----------|-------|
+          | Runner Name | \`${{ runner.name }}\` |
+          | Runner OS | \`${{ runner.os }}\` |
+          | Runner Arch | \`${{ runner.arch }}\` |
+          | Temp Directory | \`${{ runner.temp }}\` |
+          | Workspace | \`${{ github.workspace }}\` |
+          EOF
+
+      - name: Environment diagnostics
+        if: ${{ inputs.run_diagnostics }}
+        run: |
+          echo "=== System Information ==="
+          uname -a
+
+          echo ""
+          echo "=== CPU Info ==="
+          nproc
+
+          echo ""
+          echo "=== Memory Info ==="
+          free -h
+
+          echo ""
+          echo "=== Disk Info ==="
+          df -h
+
+          echo ""
+          echo "=== Docker Version ==="
+          docker --version || echo "Docker not available"
+
+          echo ""
+          echo "=== Network Connectivity ==="
+          curl -s -o /dev/null -w "GitHub API: HTTP %{http_code}\n" https://api.github.com || echo "Network check failed"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Custom Label Runner
+  # Demonstrates label and runner group strategies
+  # ---------------------------------------------------------------------------
+  custom-label-runner:
+    name: "Label Strategies"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Label strategies
+        run: |
+          echo "=== Runner Label Strategies ==="
+          echo ""
+          echo "Labels let you route jobs to specific runners:"
+          echo "  - [self-hosted, linux]       -- General Linux runner"
+          echo "  - [self-hosted, gpu]         -- GPU-enabled runner"
+          echo "  - [self-hosted, high-memory] -- High-memory runner"
+          echo "  - [self-hosted, production]  -- Production environment runner"
+          echo "  - [self-hosted, windows, dotnet] -- Windows .NET runner"
+          echo ""
+          echo "Runner Group strategies for organization:"
+          echo "  - development   -- Dev and test workloads"
+          echo "  - production    -- Production deployments only"
+          echo "  - team-payments -- Team-specific runners"
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Container Job
+  # Runs inside a container on a self-hosted runner
+  # ---------------------------------------------------------------------------
+  container-job:
+    name: "Container Job"
+    runs-on: [self-hosted, linux]
+    container:
+      image: node:20-slim
+
+    steps:
+      - name: Verify container environment
+        run: |
+          echo "=== Container Environment ==="
+          echo "Node version: $(node --version)"
+          echo "NPM version:  $(npm --version)"
+          echo ""
+          echo "=== OS Information ==="
+          cat /etc/os-release
+
+      - name: Show isolation benefits
+        run: |
+          echo "=== Container Isolation Benefits ==="
+          echo "1. Consistent environment across all runners"
+          echo "2. No dependency conflicts between jobs"
+          echo "3. Clean slate for every job execution"
+          echo "4. Easy to reproduce locally with Docker"
+          echo "5. Reduced runner maintenance burden"
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Security Notes
+  # Summarizes security best practices for self-hosted runners
+  # ---------------------------------------------------------------------------
+  security-notes:
+    name: "Security Checklist"
+    runs-on: [self-hosted, linux]
+    needs: [standard-runner, custom-label-runner, container-job]
+
+    steps:
+      - name: Security checklist
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Self-Hosted Runner Security Checklist
+
+          | Practice | Description |
+          |----------|-------------|
+          | Ephemeral runners | Use ephemeral/disposable runners when possible |
+          | No public repos | Never use self-hosted runners with public repositories |
+          | Runner groups | Use runner groups to control access |
+          | Least privilege | Grant minimum required permissions |
+          | Network segmentation | Isolate runners in dedicated network segments |
+          | Keep updated | Regularly update runner software and OS |
+          | Audit logs | Monitor and review runner activity logs |
+          | Clean workspace | Ensure workspace is cleaned between jobs |
+          EOF

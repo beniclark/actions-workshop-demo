@@ -1,0 +1,199 @@
+# =============================================================================
+# Workshop: Full CI/CD Pipeline
+# =============================================================================
+# This workflow demonstrates a complete CI/CD pipeline in a single workflow:
+# - Build, test, scan, and deploy in one file
+# - Dynamic environment selection
+# - Conditional deployment gating
+# - Pipeline-wide summary reporting
+#
+# This "OneFlow" approach keeps everything in a single workflow for
+# simpler repos, while the split CI/CD approach (workflows 04 + 05)
+# is better for larger teams and complex pipelines.
+# =============================================================================
+
+name: "Full Pipeline"
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy after build/test"
+        required: false
+        type: boolean
+        default: false
+      environment:
+        description: "Target environment"
+        required: false
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_NAME: workshop-demo
+  PYTHON_VERSION: "3.12"
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Build and Test
+  # Installs deps, runs tests, builds Docker image
+  # ---------------------------------------------------------------------------
+  build-and-test:
+    name: "Build & Test"
+    runs-on: [self-hosted, linux]
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          echo "Running test suite..."
+          pytest tests/ -v --tb=short
+
+      - name: Generate image tag
+        id: tag
+        run: |
+          IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $IMAGE_TAG"
+
+      - name: Build Docker image
+        run: |
+          echo "Building Docker image..."
+          docker build \
+            --build-arg APP_VERSION=${{ steps.tag.outputs.image_tag }} \
+            -t ${{ env.APP_NAME }}:${{ steps.tag.outputs.image_tag }} \
+            -t ${{ env.APP_NAME }}:latest \
+            .
+          echo "Docker build complete."
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Security Scan
+  # Runs simulated security scans against the built image
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: "Security Scan"
+    runs-on: [self-hosted, linux]
+    needs: build-and-test
+
+    steps:
+      - name: Run security scan
+        run: |
+          echo "=== Security Scan Results ==="
+          echo ""
+          echo "Image: ${{ env.APP_NAME }}:${{ needs.build-and-test.outputs.image_tag }}"
+          echo ""
+          echo "Vulnerability Summary (simulated):"
+          echo "  Critical: 0"
+          echo "  High:     0"
+          echo "  Medium:   2"
+          echo "  Low:      5"
+          echo ""
+          echo "Dependency Check:"
+          echo "  Outdated packages: 1"
+          echo "  Known CVEs: 0"
+          echo ""
+          echo "License Check:"
+          echo "  Copyleft licenses: 0"
+          echo "  Permissive licenses: 12"
+          echo ""
+          echo "Scan passed -- no critical or high vulnerabilities found."
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Deploy
+  # Conditionally deploys based on the deploy input
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: "Deploy to ${{ inputs.environment || 'dev' }}"
+    runs-on: [self-hosted, linux]
+    needs: [build-and-test, security-scan]
+    if: ${{ inputs.deploy != false }}
+    environment: ${{ inputs.environment || 'dev' }}
+
+    steps:
+      - name: Deploy application
+        run: |
+          echo "=== Deploying ==="
+          echo "App:         ${{ env.APP_NAME }}"
+          echo "Image Tag:   ${{ needs.build-and-test.outputs.image_tag }}"
+          echo "Environment: ${{ inputs.environment || 'dev' }}"
+          echo ""
+          echo "Deploying... (simulated)"
+          echo "Deployment complete."
+
+      - name: Verify deployment
+        run: |
+          echo "=== Deployment Verification ==="
+          echo "Health check: OK"
+          echo "Version:      ${{ needs.build-and-test.outputs.image_tag }} -- OK"
+          echo "Verification passed."
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Pipeline Summary
+  # Always runs — generates a comprehensive summary report
+  # ---------------------------------------------------------------------------
+  pipeline-summary:
+    name: "Pipeline Summary"
+    runs-on: [self-hosted, linux]
+    needs: [build-and-test, security-scan, deploy]
+    if: always()
+
+    steps:
+      - name: Generate pipeline report
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Full Pipeline Report
+
+          | Stage | Status |
+          |-------|--------|
+          | Build & Test | \`${{ needs.build-and-test.result }}\` |
+          | Security Scan | \`${{ needs.security-scan.result }}\` |
+          | Deploy | \`${{ needs.deploy.result }}\` |
+
+          | Property | Value |
+          |----------|-------|
+          | App | \`${{ env.APP_NAME }}\` |
+          | Image Tag | \`${{ needs.build-and-test.outputs.image_tag }}\` |
+          | Environment | \`${{ inputs.environment || 'dev' }}\` |
+          | Ref | \`${{ github.ref }}\` |
+          | SHA | \`${{ github.sha }}\` |
+          | Actor | \`${{ github.actor }}\` |
+
+          ---
+
+          > **OneFlow Pattern**: This workflow combines CI and CD in a single file.
+          > This is ideal for smaller projects and teams. For larger organizations,
+          > consider splitting into separate CI and CD workflows (see workflows 04 and 05)
+          > for better separation of concerns and independent triggering.
+          EOF

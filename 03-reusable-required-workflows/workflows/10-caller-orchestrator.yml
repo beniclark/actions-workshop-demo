@@ -1,0 +1,100 @@
+# Caller / Orchestrator Workflow
+# This workflow demonstrates how to compose reusable workflows into
+# a complete CI/CD pipeline. It calls the build, security scan, and
+# deploy workflows in sequence, passing outputs between stages.
+#
+# This is the "caller" side of the reusable workflow pattern.
+# It orchestrates the pipeline and provides inputs/secrets to each stage.
+
+name: "10 - Caller Orchestrator"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: "Target deployment environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+jobs:
+  # Build stage: compile, test, and package the application.
+  # This calls the reusable build workflow and captures its outputs
+  # for use by downstream jobs.
+  build:
+    name: Build
+    uses: ./.github/workflows/07-reusable-build.yml
+    with:
+      app_name: workshop-demo
+      python_version: "3.12"
+      working_directory: "."
+      run_tests: true
+    secrets:
+      registry_url: ${{ secrets.REGISTRY_URL }}
+
+  # Security stage: scan the built artifacts for vulnerabilities.
+  # Depends on build so it can scan the container image. The
+  # image_tag output from build is passed as input here.
+  security:
+    name: Security Scan
+    needs: build
+    uses: ./.github/workflows/08-reusable-security-scan.yml
+    with:
+      scan_type: full
+      image_tag: ${{ needs.build.outputs.image_tag }}
+      working_directory: "."
+
+  # Deploy stage: deploy the validated build to the target environment.
+  # Only runs on pushes to main or manual dispatch (not on PRs).
+  # Requires both build and security to pass before proceeding.
+  deploy:
+    name: Deploy
+    needs: [build, security]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/09-reusable-deploy.yml
+    with:
+      app_name: workshop-demo
+      environment: ${{ inputs.deploy_env || 'staging' }}
+      image_tag: ${{ needs.build.outputs.image_tag }}
+    secrets:
+      deploy_token: ${{ secrets.DEPLOY_TOKEN }}
+
+  # Pipeline summary: runs regardless of upstream results to provide
+  # a consolidated view of the entire pipeline in GITHUB_STEP_SUMMARY.
+  pipeline-complete:
+    name: Pipeline Summary
+    needs: [build, security, deploy]
+    if: always()
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Pipeline summary
+        run: |
+          echo "## Pipeline Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stage | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | \`${{ needs.build.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security Scan | \`${{ needs.security.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy | \`${{ needs.deploy.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Pipeline Details" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Trigger:** \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Branch:** \`${{ github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Actor:** \`${{ github.actor }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> **OneFlow:** This pipeline demonstrates how reusable workflows" >> "$GITHUB_STEP_SUMMARY"
+          echo "> enable composable, maintainable CI/CD pipelines. Each stage is" >> "$GITHUB_STEP_SUMMARY"
+          echo "> independently testable and version-controlled, following the" >> "$GITHUB_STEP_SUMMARY"
+          echo "> OneFlow principle of a single source of truth for each concern." >> "$GITHUB_STEP_SUMMARY"

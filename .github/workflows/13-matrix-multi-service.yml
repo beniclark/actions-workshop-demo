@@ -1,0 +1,260 @@
+# 13 - Matrix Strategy: Multi-Service Builds
+#
+# Demonstrates dynamic matrix generation for building only the services
+# that have changed. Detects file changes via git diff and produces a
+# JSON matrix consumed by a parallel build job.
+#
+# Key patterns:
+#   - Dynamic matrix generation from changed file detection
+#   - Runtime-specific build steps (Python, Node, Go)
+#   - Parallel execution with fail-fast disabled
+#   - Fan-in integration gate that requires all builds to pass
+#   - Graceful fallback to building all services when none detected
+
+name: "13 - Matrix Multi-Service"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: "Force build of all services"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------
+  # Detect which services have changed
+  # --------------------------------------------------------
+  detect-changes:
+    name: "Detect Changes"
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      service-count: ${{ steps.set-matrix.outputs.service_count }}
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed services
+        id: set-matrix
+        run: |
+          echo "Detecting changed services..."
+          echo ""
+
+          # Define all services with their metadata
+          # Format: directory:runtime:port
+          ALL_SERVICES=(
+            "api:python:8080"
+            "web:node:3000"
+            "worker:python:8081"
+            "gateway:go:8443"
+          )
+
+          FORCE_ALL="${{ github.event.inputs.force_all }}"
+          CHANGED_SERVICES=()
+
+          if [ "$FORCE_ALL" == "true" ]; then
+            echo "Force all: building every service"
+            CHANGED_SERVICES=("${ALL_SERVICES[@]}")
+          else
+            # Determine the diff base
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              BASE="${{ github.event.pull_request.base.sha }}"
+            elif [ "${{ github.event_name }}" == "push" ]; then
+              BASE="${{ github.event.before }}"
+            else
+              BASE="HEAD~1"
+            fi
+
+            echo "Diff base: $BASE"
+            echo ""
+
+            # Check each service directory for changes
+            for SERVICE_ENTRY in "${ALL_SERVICES[@]}"; do
+              SERVICE_DIR=$(echo "$SERVICE_ENTRY" | cut -d: -f1)
+              if git diff --name-only "$BASE" HEAD 2>/dev/null | grep -q "^${SERVICE_DIR}/"; then
+                echo "  [CHANGED] $SERVICE_DIR"
+                CHANGED_SERVICES+=("$SERVICE_ENTRY")
+              else
+                echo "  [UNCHANGED] $SERVICE_DIR"
+              fi
+            done
+          fi
+
+          echo ""
+
+          # Default to all services if none detected
+          if [ ${#CHANGED_SERVICES[@]} -eq 0 ]; then
+            echo "No specific changes detected -- defaulting to all services"
+            CHANGED_SERVICES=("${ALL_SERVICES[@]}")
+          fi
+
+          # Build JSON matrix
+          MATRIX_JSON='{"include":['
+          FIRST=true
+          for SERVICE_ENTRY in "${CHANGED_SERVICES[@]}"; do
+            SERVICE_DIR=$(echo "$SERVICE_ENTRY" | cut -d: -f1)
+            RUNTIME=$(echo "$SERVICE_ENTRY" | cut -d: -f2)
+            PORT=$(echo "$SERVICE_ENTRY" | cut -d: -f3)
+
+            if [ "$FIRST" != true ]; then
+              MATRIX_JSON+=","
+            fi
+            MATRIX_JSON+="{\"service\":\"$SERVICE_DIR\",\"runtime\":\"$RUNTIME\",\"port\":$PORT}"
+            FIRST=false
+          done
+          MATRIX_JSON+=']}'
+
+          echo ""
+          echo "Generated matrix JSON:"
+          echo "$MATRIX_JSON" | jq .
+
+          echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
+          echo "service_count=${#CHANGED_SERVICES[@]}" >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------
+  # Build each service in parallel
+  # --------------------------------------------------------
+  build-service:
+    name: "Build ${{ matrix.service }}"
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service }} (${{ matrix.runtime }})
+        run: |
+          echo "================================================"
+          echo "  Building: ${{ matrix.service }}"
+          echo "  Runtime:  ${{ matrix.runtime }}"
+          echo "  Port:     ${{ matrix.port }}"
+          echo "================================================"
+          echo ""
+
+          SHA_TAG="${{ github.sha }}"
+          SHORT_SHA="${SHA_TAG:0:8}"
+
+          case "${{ matrix.runtime }}" in
+            python)
+              echo "--- Python Build Steps ---"
+              echo "  Installing dependencies: pip install -r ${{ matrix.service }}/requirements.txt"
+              sleep 1
+              echo "  [DONE] Dependencies installed"
+              echo ""
+              echo "  Running linter: flake8 ${{ matrix.service }}/"
+              sleep 1
+              echo "  [DONE] Linting passed"
+              echo ""
+              echo "  Running tests: pytest ${{ matrix.service }}/tests/"
+              sleep 1
+              echo "  [PASS] 24 tests passed, 0 failed"
+              echo ""
+              echo "  Building wheel: python -m build ${{ matrix.service }}/"
+              sleep 1
+              echo "  [DONE] Wheel built"
+              ;;
+
+            node)
+              echo "--- Node Build Steps ---"
+              echo "  Installing dependencies: npm ci --prefix ${{ matrix.service }}/"
+              sleep 1
+              echo "  [DONE] Dependencies installed (0 vulnerabilities)"
+              echo ""
+              echo "  Running linter: npm run lint --prefix ${{ matrix.service }}/"
+              sleep 1
+              echo "  [DONE] Linting passed"
+              echo ""
+              echo "  Running tests: npm test --prefix ${{ matrix.service }}/"
+              sleep 1
+              echo "  [PASS] 31 tests passed, 0 failed"
+              echo ""
+              echo "  Building: npm run build --prefix ${{ matrix.service }}/"
+              sleep 1
+              echo "  [DONE] Build output in ${{ matrix.service }}/dist/"
+              ;;
+
+            go)
+              echo "--- Go Build Steps ---"
+              echo "  Downloading modules: go mod download"
+              sleep 1
+              echo "  [DONE] Modules downloaded"
+              echo ""
+              echo "  Running vet: go vet ./${{ matrix.service }}/..."
+              sleep 1
+              echo "  [DONE] Vet passed"
+              echo ""
+              echo "  Running tests: go test -v ./${{ matrix.service }}/..."
+              sleep 1
+              echo "  [PASS] 18 tests passed, 0 failed"
+              echo ""
+              echo "  Building binary: go build -o ${{ matrix.service }}/bin/app ./${{ matrix.service }}/cmd/"
+              sleep 1
+              echo "  [DONE] Binary built"
+              ;;
+          esac
+
+          echo ""
+          echo "--- Docker Build ---"
+          echo "  docker build -t ${{ matrix.service }}:${SHORT_SHA} -f ${{ matrix.service }}/Dockerfile ."
+          sleep 1
+          echo "  [DONE] Image built: ${{ matrix.service }}:${SHORT_SHA}"
+          echo ""
+          echo "Build complete for ${{ matrix.service }}"
+
+  # --------------------------------------------------------
+  # Integration gate: all services must build successfully
+  # --------------------------------------------------------
+  integration-gate:
+    name: "Integration Gate"
+    needs: build-service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm all services built
+        run: |
+          echo "================================================"
+          echo "  Integration Gate"
+          echo "================================================"
+          echo ""
+          echo "All services built successfully."
+          echo "Build matrix result: ${{ needs.build-service.result }}"
+          echo ""
+          echo "The integration gate confirms that every service"
+          echo "in the dynamic matrix compiled, passed tests, and"
+          echo "produced a container image."
+
+      - name: Write summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          # Multi-Service Build Summary
+
+          All services in the dynamic matrix built successfully.
+
+          ## Key Patterns Demonstrated
+
+          | Pattern | How It Works |
+          |---------|-------------|
+          | **Dynamic matrix** | `detect-changes` job uses `git diff` to find modified service directories and emits a JSON matrix |
+          | **Parallel execution** | `build-service` job runs each matrix entry concurrently (`max-parallel: 4`) |
+          | **fail-fast: false** | A failure in one service does not cancel the others -- every service gets a result |
+          | **Fan-in gate** | `integration-gate` runs only after *all* matrix legs finish, acting as a single required status check |
+          | **Runtime-specific steps** | Build logic branches on `matrix.runtime` (Python, Node, Go) inside a shared job definition |
+
+          These patterns let you scale from a handful of services to dozens without
+          duplicating workflow YAML for each one.
+          EOF
+
+          echo "Summary written to GITHUB_STEP_SUMMARY"

@@ -1,0 +1,206 @@
+# =============================================================================
+# Workshop: CD - Deploy Pipeline
+# =============================================================================
+# This workflow demonstrates a continuous deployment pipeline:
+# - Triggered by CI completion or manual dispatch
+# - Progressive deployment through dev -> staging -> production
+# - Environment protection rules and approval gates
+# - Deployment verification and rollback strategies
+# =============================================================================
+
+name: "CD — Deploy"
+
+on:
+  # Automatically triggered when the CI workflow completes on main
+  workflow_run:
+    workflows: ["CI — Build & Test"]
+    types: [completed]
+    branches: [main]
+
+  # Manual trigger with optional overrides
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (defaults to latest SHA)"
+        required: false
+        type: string
+      skip_dev:
+        description: "Skip dev deployment"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  deployments: write
+
+env:
+  APP_NAME: workshop-demo
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Preflight
+  # Resolves the image tag and verifies the image exists
+  # ---------------------------------------------------------------------------
+  preflight:
+    name: "Preflight Checks"
+    runs-on: [self-hosted, linux]
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      deploy_sha: ${{ steps.resolve.outputs.deploy_sha }}
+
+    steps:
+      - name: Resolve image tag
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+            echo "Using manually specified tag: $IMAGE_TAG"
+          else
+            IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "Using SHA-based tag: $IMAGE_TAG"
+          fi
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "deploy_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Verify image
+        run: |
+          echo "Verifying image: ${{ env.APP_NAME }}:${{ steps.resolve.outputs.image_tag }}"
+          echo "Image verification passed (placeholder)"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Deploy to Dev
+  # First deployment target — no protection rules
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: "Deploy to Dev"
+    runs-on: [self-hosted, linux]
+    needs: preflight
+    if: ${{ !inputs.skip_dev }}
+    environment: dev
+
+    steps:
+      - name: Deploy to dev
+        run: |
+          echo "=== Deploying to Dev ==="
+          echo "Image: ${{ env.APP_NAME }}:${{ needs.preflight.outputs.image_tag }}"
+          echo "SHA:   ${{ needs.preflight.outputs.deploy_sha }}"
+          echo ""
+          echo "Deploying... (simulated)"
+          echo "Deployment complete."
+
+      - name: Smoke test
+        run: |
+          echo "Running smoke tests against dev..."
+          echo "Health check: OK"
+          echo "Basic functionality: OK"
+          echo "Smoke tests passed."
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Deploy to Staging
+  # Requires dev to succeed — canary deployment strategy
+  # ---------------------------------------------------------------------------
+  deploy-staging:
+    name: "Deploy to Staging"
+    runs-on: [self-hosted, linux]
+    needs: [preflight, deploy-dev]
+    environment: staging
+
+    steps:
+      - name: Deploy to staging
+        run: |
+          echo "=== Deploying to Staging ==="
+          echo "Image: ${{ env.APP_NAME }}:${{ needs.preflight.outputs.image_tag }}"
+          echo ""
+          echo "Deployment strategy: Canary"
+          echo "  Phase 1: Deploy to 10% of instances"
+          echo "  Phase 2: Monitor error rates for 5 minutes"
+          echo "  Phase 3: Promote to 50% if healthy"
+          echo "  Phase 4: Full rollout if metrics are stable"
+          echo ""
+          echo "Deploying... (simulated)"
+          echo "Canary deployment complete."
+
+      - name: Extended verification
+        run: |
+          echo "=== Extended Verification ==="
+          echo ""
+          echo "Health check: OK"
+          echo "Response time: 45ms (threshold: 200ms) -- OK"
+          echo "Error rate: 0.01% (threshold: 1%) -- OK"
+          echo "DB connectivity: OK"
+          echo ""
+          echo "All staging verifications passed."
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Deploy to Production
+  # Requires staging — strictest protection rules
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    name: "Deploy to Production"
+    runs-on: [self-hosted, linux]
+    needs: [preflight, deploy-staging]
+    environment: production
+
+    steps:
+      - name: Pre-deployment snapshot
+        run: |
+          echo "=== Pre-Deployment Snapshot ==="
+          echo "Creating snapshot of current production state..."
+          echo "Current version: (previous)"
+          echo "Snapshot ID: snap-$(date +%s)"
+          echo "Snapshot complete — rollback point established."
+
+      - name: Deploy to production
+        run: |
+          echo "=== Deploying to Production ==="
+          echo "Image: ${{ env.APP_NAME }}:${{ needs.preflight.outputs.image_tag }}"
+          echo ""
+          echo "Deployment strategy: Rolling Update"
+          echo "  - Max unavailable: 25%"
+          echo "  - Max surge: 25%"
+          echo "  - Health check grace period: 30s"
+          echo ""
+          echo "Deploying... (simulated)"
+          echo "Rolling update complete."
+
+      - name: Post-deployment verification
+        run: |
+          echo "=== Post-Deployment Verification ==="
+          echo ""
+          echo "Health check: OK"
+          echo "Version check: ${{ needs.preflight.outputs.image_tag }} -- OK"
+          echo "Response time: 42ms -- OK"
+          echo "Error rate: 0.00% -- OK"
+          echo "All production verifications passed."
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "=== ROLLBACK TRIGGERED ==="
+          echo "Deployment verification failed!"
+          echo "Rolling back to previous snapshot..."
+          echo "Restoring previous version..."
+          echo "Rollback complete."
+          echo "Please investigate the failure before retrying."
+
+      - name: Deployment summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Production Deployment Summary
+
+          | Property | Value |
+          |----------|-------|
+          | App | \`${{ env.APP_NAME }}\` |
+          | Image Tag | \`${{ needs.preflight.outputs.image_tag }}\` |
+          | SHA | \`${{ needs.preflight.outputs.deploy_sha }}\` |
+          | Strategy | Rolling Update |
+          | Dev | Deployed |
+          | Staging | Deployed (Canary) |
+          | Production | Deployed |
+          | Status | Success |
+          EOF

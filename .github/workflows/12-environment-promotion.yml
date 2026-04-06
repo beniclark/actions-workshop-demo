@@ -1,0 +1,330 @@
+# 12 - Environment Promotion Pipeline
+#
+# Demonstrates progressive deployment through dev -> staging -> production
+# with environment-specific configuration, smoke tests, integration tests,
+# and automatic rollback on failure.
+#
+# Key patterns:
+#   - Environment promotion with gates between stages
+#   - Conditional job execution based on starting environment
+#   - Environment-specific configuration (replicas, CPU, memory, log level)
+#   - Promotion tracking with unique IDs
+#   - Concurrency control to prevent simultaneous promotions
+#   - Rollback on production deployment failure
+
+name: "12 - Environment Promotion"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Container image tag to promote"
+        type: string
+        default: "workshop-demo:latest"
+      start_from:
+        description: "Environment to start promotion from"
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: promotion-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: workshop-demo
+
+jobs:
+  # --------------------------------------------------------
+  # Validate the artifact before any deployment begins
+  # --------------------------------------------------------
+  validate-artifact:
+    name: "Validate Artifact"
+    runs-on: ubuntu-latest
+    outputs:
+      promotion-id: ${{ steps.generate-id.outputs.promotion_id }}
+      image-tag: ${{ github.event.inputs.image_tag }}
+    steps:
+      - name: Generate promotion ID
+        id: generate-id
+        run: |
+          PROMO_ID="promo-$(date +%Y%m%d%H%M%S)-$((RANDOM % 9000 + 1000))"
+          echo "promotion_id=$PROMO_ID" >> "$GITHUB_OUTPUT"
+          echo "Promotion ID: $PROMO_ID"
+
+      - name: Validate image reference
+        run: |
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          echo "Validating image: $IMAGE_TAG"
+
+          # Check that the image tag is not empty
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "ERROR: Image tag is empty"
+            exit 1
+          fi
+
+          # Check that the image tag contains a colon (name:tag format)
+          if [[ ! "$IMAGE_TAG" == *":"* ]]; then
+            echo "ERROR: Image tag must be in name:tag format"
+            exit 1
+          fi
+
+          echo "Image reference is valid"
+          echo "Image: $IMAGE_TAG"
+          echo "Starting from: ${{ github.event.inputs.start_from }}"
+
+  # --------------------------------------------------------
+  # Deploy to Dev
+  # --------------------------------------------------------
+  deploy-dev:
+    name: "Deploy to Dev"
+    needs: validate-artifact
+    if: github.event.inputs.start_from == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Deploy to dev environment
+        run: |
+          echo "================================================"
+          echo "  Deploying to DEV"
+          echo "================================================"
+          echo ""
+          echo "Promotion ID: ${{ needs.validate-artifact.outputs.promotion-id }}"
+          echo "Image:         ${{ needs.validate-artifact.outputs.image-tag }}"
+          echo ""
+          echo "--- Dev Environment Configuration ---"
+          echo "  Replicas:   1"
+          echo "  CPU:        0.5"
+          echo "  Memory:     512Mi"
+          echo "  Log Level:  debug"
+          echo ""
+          echo "Applying deployment manifest..."
+          sleep 2
+          echo "Deployment applied successfully"
+
+      - name: Smoke test
+        run: |
+          echo "Running dev smoke tests..."
+          echo ""
+          echo "  [PASS] Application starts without errors"
+          echo "  [PASS] Health endpoint returns 200"
+          echo "  [PASS] Configuration loaded correctly"
+          echo "  [PASS] Database connection established"
+          echo ""
+          echo "All smoke tests passed"
+
+  # --------------------------------------------------------
+  # Deploy to Staging
+  # --------------------------------------------------------
+  deploy-staging:
+    name: "Deploy to Staging"
+    needs: [validate-artifact, deploy-dev]
+    if: |
+      always() &&
+      (needs.deploy-dev.result == 'success' || github.event.inputs.start_from == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy to staging environment
+        run: |
+          echo "================================================"
+          echo "  Deploying to STAGING"
+          echo "================================================"
+          echo ""
+          echo "Promotion ID: ${{ needs.validate-artifact.outputs.promotion-id }}"
+          echo "Image:         ${{ needs.validate-artifact.outputs.image-tag }}"
+          echo ""
+          echo "--- Staging Environment Configuration ---"
+          echo "  Replicas:   2"
+          echo "  CPU:        1.0"
+          echo "  Memory:     1Gi"
+          echo "  Log Level:  info"
+          echo ""
+          echo "Applying deployment manifest..."
+          sleep 2
+          echo "Deployment applied successfully"
+
+      - name: Integration test suite
+        run: |
+          echo "Running staging integration tests..."
+          echo ""
+          echo "--- API Contract Tests ---"
+          for i in $(seq 1 15); do
+            echo "  [PASS] API contract test $i/15"
+          done
+          echo ""
+          echo "--- Database Migration Tests ---"
+          echo "  [PASS] Schema migration up"
+          echo "  [PASS] Schema migration down (rollback)"
+          echo "  [PASS] Data integrity after migration"
+          echo ""
+          echo "--- External Service Connectivity ---"
+          echo "  [PASS] Auth service reachable"
+          echo "  [PASS] Cache service reachable"
+          echo "  [PASS] Message queue reachable"
+          echo ""
+          echo "--- Performance Baseline ---"
+          echo "  [PASS] p50 latency: 45ms (threshold: 100ms)"
+          echo "  [PASS] p99 latency: 120ms (threshold: 200ms)"
+          echo "  [PASS] Throughput: 1200 req/s (threshold: 500 req/s)"
+          echo ""
+          echo "All integration tests passed (15/15 API, DB, connectivity, perf)"
+
+  # --------------------------------------------------------
+  # Deploy to Production
+  # --------------------------------------------------------
+  deploy-production:
+    name: "Deploy to Production"
+    needs: [validate-artifact, deploy-staging]
+    if: |
+      always() &&
+      (needs.deploy-staging.result == 'success' || github.event.inputs.start_from == 'production')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Pre-production checklist
+        run: |
+          echo "================================================"
+          echo "  Pre-Production Checklist"
+          echo "================================================"
+          echo ""
+          echo "  [PASS] Change approval recorded"
+          echo "  [PASS] Rollback plan documented"
+          echo "  [PASS] On-call team notified"
+          echo "  [PASS] Monitoring dashboards reviewed"
+          echo "  [PASS] Feature flags configured"
+          echo ""
+          echo "Pre-production checklist complete"
+
+      - name: Deploy to production environment
+        id: deploy
+        run: |
+          echo "================================================"
+          echo "  Deploying to PRODUCTION"
+          echo "================================================"
+          echo ""
+          echo "Promotion ID: ${{ needs.validate-artifact.outputs.promotion-id }}"
+          echo "Image:         ${{ needs.validate-artifact.outputs.image-tag }}"
+          echo ""
+          echo "--- Production Environment Configuration ---"
+          echo "  Replicas:   4-10 (HPA)"
+          echo "  CPU:        2.0"
+          echo "  Memory:     2Gi"
+          echo "  Log Level:  warning"
+          echo ""
+          echo "Performing rolling update..."
+          sleep 2
+          echo "  Old pods: terminating gracefully"
+          echo "  New pods: starting with readiness probes"
+          sleep 1
+          echo "  Rolling update complete"
+
+      - name: Production verification
+        id: verify
+        run: |
+          echo "Running production verification..."
+          echo ""
+          echo "--- Health Check ---"
+          echo "  [PASS] All pods reporting healthy"
+          echo "  [PASS] Load balancer targets healthy"
+          echo ""
+          echo "--- Canary Analysis ---"
+          echo "  [PASS] Canary traffic routed (5%)"
+          echo "  [PASS] No anomalies detected in canary"
+          echo "  [PASS] Canary promoted to full traffic"
+          echo ""
+          echo "--- Error Rate ---"
+          echo "  [PASS] Error rate: 0.003% (threshold: 0.01%)"
+          echo ""
+          echo "--- Latency ---"
+          echo "  [PASS] p99 latency: 132ms (threshold: 150ms)"
+          echo ""
+          echo "Production verification passed"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "================================================"
+          echo "  ROLLING BACK PRODUCTION DEPLOYMENT"
+          echo "================================================"
+          echo ""
+          echo "Promotion ID: ${{ needs.validate-artifact.outputs.promotion-id }}"
+          echo "Failed image: ${{ needs.validate-artifact.outputs.image-tag }}"
+          echo ""
+          echo "Initiating rollback to previous stable version..."
+          sleep 2
+          echo "  Previous deployment manifest restored"
+          echo "  Rolling update to previous version in progress..."
+          sleep 1
+          echo "  Rollback complete"
+          echo ""
+          echo "Action required: Investigate deployment failure before re-attempting"
+
+  # --------------------------------------------------------
+  # Promotion Summary
+  # --------------------------------------------------------
+  promotion-summary:
+    name: "Promotion Summary"
+    needs: [validate-artifact, deploy-dev, deploy-staging, deploy-production]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate promotion report
+        run: |
+          # Determine status for each environment
+          DEV_STATUS="${{ needs.deploy-dev.result }}"
+          STAGING_STATUS="${{ needs.deploy-staging.result }}"
+          PROD_STATUS="${{ needs.deploy-production.result }}"
+
+          # Map result to display status
+          map_status() {
+            case "$1" in
+              success)  echo "Succeeded" ;;
+              failure)  echo "Failed" ;;
+              skipped)  echo "Skipped" ;;
+              cancelled) echo "Cancelled" ;;
+              *)        echo "N/A" ;;
+            esac
+          }
+
+          DEV_DISPLAY=$(map_status "$DEV_STATUS")
+          STAGING_DISPLAY=$(map_status "$STAGING_STATUS")
+          PROD_DISPLAY=$(map_status "$PROD_STATUS")
+
+          cat >> "$GITHUB_STEP_SUMMARY" << 'HEADER'
+          # Environment Promotion Report
+
+          HEADER
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          **Promotion ID:** \`${{ needs.validate-artifact.outputs.promotion-id }}\`
+          **Image:** \`${{ needs.validate-artifact.outputs.image-tag }}\`
+          **Started from:** \`${{ github.event.inputs.start_from }}\`
+          **Triggered by:** @${{ github.actor }}
+
+          ## Environment Status
+
+          | Environment | Status | Replicas | CPU | Memory | Log Level |
+          |-------------|--------|----------|-----|--------|-----------|
+          | Dev | ${DEV_DISPLAY} | 1 | 0.5 | 512Mi | debug |
+          | Staging | ${STAGING_DISPLAY} | 2 | 1.0 | 1Gi | info |
+          | Production | ${PROD_DISPLAY} | 4-10 (HPA) | 2.0 | 2Gi | warning |
+
+          ## Key Patterns Demonstrated
+
+          - **Progressive promotion** through dev, staging, and production
+          - **Conditional execution** allows starting from any environment
+          - **Environment-specific configuration** for replicas, resources, and log levels
+          - **Concurrency control** prevents simultaneous promotions
+          - **Automatic rollback** on production deployment failure
+          - **Promotion tracking** with unique IDs for audit trail
+          EOF
+
+          echo ""
+          echo "Promotion summary written to GITHUB_STEP_SUMMARY"

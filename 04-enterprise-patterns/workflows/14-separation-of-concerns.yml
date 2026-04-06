@@ -1,0 +1,280 @@
+# 14 - Separation of Concerns / Team Ownership
+#
+# Demonstrates how different teams own different stages of a pipeline.
+# Each job represents a team boundary: App Team builds, Security Team
+# scans, GRC Team validates compliance, and Platform Team deploys.
+#
+# Key patterns:
+#   - Clear team ownership boundaries per job
+#   - Reusable workflow model (each team maintains their own workflow)
+#   - Change propagation: update once, all consuming repos inherit
+#   - Required workflows for organizational enforcement
+#   - OneFlow model for cross-cutting concerns
+
+name: "14 - Separation of Concerns"
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Run the deployment step"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------
+  # App Team: Build, Test, Package
+  # --------------------------------------------------------
+  build:
+    name: "Build (App Team)"
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.build.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build application
+        id: build
+        run: |
+          SHA_TAG="${{ github.sha }}"
+          SHORT_SHA="${SHA_TAG:0:8}"
+          IMAGE_TAG="workshop-demo:${SHORT_SHA}"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+          echo "================================================"
+          echo "  App Team -- Build Stage"
+          echo "================================================"
+          echo ""
+          echo "Image tag: $IMAGE_TAG"
+          echo ""
+          echo "--- Team Ownership Boundaries ---"
+          echo ""
+          echo "  The App Team OWNS:"
+          echo "    - Application source code"
+          echo "    - Unit and integration tests"
+          echo "    - Dockerfile and build configuration"
+          echo "    - Package/artifact creation"
+          echo ""
+          echo "  The App Team DOES NOT OWN:"
+          echo "    - Security scanning policies"
+          echo "    - Compliance and audit rules"
+          echo "    - Deployment targets and infrastructure"
+          echo ""
+          echo "This boundary means the App Team can iterate on"
+          echo "build and test without waiting on security or"
+          echo "platform changes, and vice versa."
+          echo ""
+          echo "Building application..."
+          sleep 1
+          echo "Running unit tests..."
+          sleep 1
+          echo "Packaging container image..."
+          sleep 1
+          echo ""
+          echo "Build complete: $IMAGE_TAG"
+
+  # --------------------------------------------------------
+  # Security Team: Scan and Validate
+  # --------------------------------------------------------
+  security:
+    name: "Security Scan (Security Team)"
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Security analysis
+        run: |
+          echo "================================================"
+          echo "  Security Team -- Scan Stage"
+          echo "================================================"
+          echo ""
+          echo "Scanning image: ${{ needs.build.outputs.image-tag }}"
+          echo ""
+          echo "--- Security Team Responsibilities ---"
+          echo ""
+          echo "  - Container image vulnerability scanning"
+          echo "  - Dependency CVE analysis"
+          echo "  - Secret detection in source code"
+          echo "  - SAST (Static Application Security Testing)"
+          echo "  - License compliance verification"
+          echo ""
+          echo "--- Change Propagation Model ---"
+          echo ""
+          echo "  The Security Team maintains a reusable workflow."
+          echo "  When the team updates scanning rules or adds a"
+          echo "  new scanner, the change propagates automatically"
+          echo "  to every repository that calls the workflow."
+          echo ""
+          echo "  Update once --> all repos get the new policy."
+          echo ""
+          echo "Running vulnerability scan..."
+          sleep 1
+          echo "  [PASS] 0 critical, 0 high, 2 medium, 5 low"
+          echo ""
+          echo "Running secret detection..."
+          sleep 1
+          echo "  [PASS] No secrets detected"
+          echo ""
+          echo "Running license check..."
+          sleep 1
+          echo "  [PASS] All licenses approved"
+          echo ""
+          echo "Security scan complete"
+
+  # --------------------------------------------------------
+  # GRC Team: Compliance and Audit
+  # --------------------------------------------------------
+  compliance:
+    name: "Compliance (GRC Team)"
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compliance validation
+        run: |
+          echo "================================================"
+          echo "  GRC Team -- Compliance Stage"
+          echo "================================================"
+          echo ""
+          echo "Validating image: ${{ needs.build.outputs.image-tag }}"
+          echo ""
+          echo "--- GRC Team Responsibilities ---"
+          echo ""
+          echo "  - Regulatory compliance checks (SOC2, HIPAA, PCI)"
+          echo "  - Audit trail generation"
+          echo "  - Change management policy enforcement"
+          echo "  - Evidence collection for auditors"
+          echo "  - SBOM (Software Bill of Materials) validation"
+          echo ""
+          echo "--- Required Workflow Enforcement ---"
+          echo ""
+          echo "  In GitHub Enterprise, organization admins can"
+          echo "  designate workflows as 'required.' This means"
+          echo "  every repository in the org MUST run the GRC"
+          echo "  workflow before merging to the default branch."
+          echo ""
+          echo "  The GRC team writes the rules once, and GitHub"
+          echo "  enforces them everywhere -- no repo-level opt-out."
+          echo ""
+          echo "Running SOC2 controls check..."
+          sleep 1
+          echo "  [PASS] Change management: approval recorded"
+          echo "  [PASS] Access control: least privilege verified"
+          echo "  [PASS] Audit logging: events captured"
+          echo ""
+          echo "Generating SBOM..."
+          sleep 1
+          echo "  [PASS] SBOM generated and signed"
+          echo ""
+          echo "Compliance validation complete"
+
+  # --------------------------------------------------------
+  # Platform Team: Deploy
+  # --------------------------------------------------------
+  deploy:
+    name: "Deploy (Platform Team)"
+    needs: [build, security, compliance]
+    if: github.event.inputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Deploy application
+        run: |
+          echo "================================================"
+          echo "  Platform Team -- Deploy Stage"
+          echo "================================================"
+          echo ""
+          echo "Deploying image: ${{ needs.build.outputs.image-tag }}"
+          echo ""
+          echo "--- Platform Team Responsibilities ---"
+          echo ""
+          echo "  - Kubernetes cluster management"
+          echo "  - Deployment strategy (rolling, blue-green, canary)"
+          echo "  - Infrastructure provisioning and scaling"
+          echo "  - Networking, ingress, and TLS"
+          echo "  - Observability stack (metrics, logs, traces)"
+          echo ""
+          echo "The Platform Team does not need to understand the"
+          echo "application internals. They receive a validated,"
+          echo "scanned, compliant container image and deploy it"
+          echo "using standardized tooling."
+          echo ""
+          echo "Deploying to dev environment..."
+          sleep 1
+          echo "  [DONE] Deployment manifest applied"
+          echo "  [DONE] Readiness probe passed"
+          echo "  [DONE] Service registered"
+          echo ""
+          echo "Deployment complete"
+
+  # --------------------------------------------------------
+  # Summary
+  # --------------------------------------------------------
+  summary:
+    name: "Summary"
+    needs: [build, security, compliance, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          # Separation of Concerns Summary
+
+          ## Team Ownership Map
+
+          | Stage | Owning Team | Responsibilities | Reusable? |
+          |-------|-------------|-----------------|-----------|
+          | Build | App Team | Source code, tests, Dockerfile, packaging | Yes -- `build.yml` |
+          | Security | Security Team | CVE scanning, SAST, secret detection, license check | Yes -- `security.yml` |
+          | Compliance | GRC Team | SOC2/HIPAA/PCI controls, SBOM, audit trail | Yes -- `compliance.yml` |
+          | Deploy | Platform Team | Kubernetes, networking, observability, scaling | Yes -- `deploy.yml` |
+
+          ## Change Propagation
+
+          When a team updates their reusable workflow, every repository that calls it
+          automatically inherits the change on the next run. No pull requests to
+          downstream repos are needed.
+
+          ```
+          security-team/workflows/.github/workflows/scan.yml   (update here)
+                |
+                +---> repo-a/.github/workflows/ci.yml          (calls scan.yml)
+                +---> repo-b/.github/workflows/ci.yml          (calls scan.yml)
+                +---> repo-c/.github/workflows/ci.yml          (calls scan.yml)
+          ```
+
+          ## OneFlow Model
+
+          The **OneFlow** model means each cross-cutting concern (security, compliance,
+          deployment) is defined in exactly one place. Teams own their domain, publish
+          a reusable workflow, and consuming repositories compose them together.
+
+          This avoids the "copy-paste drift" problem where each repo maintains its own
+          slightly different version of the same scanning or deployment logic.
+
+          ## Cross-Repo Usage Example
+
+          ```yaml
+          # In any application repository:
+          jobs:
+            security:
+              uses: security-team/workflows/.github/workflows/scan.yml@v2
+              with:
+                image: my-app:latest
+            compliance:
+              uses: grc-team/workflows/.github/workflows/compliance.yml@v1
+              with:
+                image: my-app:latest
+          ```
+          EOF
+
+          echo "Summary written to GITHUB_STEP_SUMMARY"

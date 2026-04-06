@@ -1,0 +1,42 @@
+# Composite Action: Setup Python Project
+# Bundles common setup steps for Python projects into a single
+# reusable action. Use within any job to get a consistent environment.
+#
+# Usage:
+#   - uses: ./.github/actions/setup-python-project
+#     with:
+#       python-version: '3.12'
+
+name: "Setup Python Project"
+description: "Checkout, install Python, and install dependencies"
+
+inputs:
+  python-version:
+    description: "Python version to install"
+    required: false
+    default: "3.12"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt --quiet
+        fi
+
+    - name: Show workspace
+      shell: bash
+      run: |
+        echo "Python: $(python --version)"
+        echo "Workspace: $(pwd)"
+        echo "Files: $(ls -1 | head -10)"

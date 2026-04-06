@@ -1,0 +1,276 @@
+# 15 - Pipeline Guardrails
+#
+# Demonstrates seven guardrails that harden a deployment pipeline
+# against common risks: least-privilege permissions, concurrency
+# control, timeouts, input validation, immutable artifacts,
+# SHA-pinned actions, and environment protection rules.
+#
+# Key patterns:
+#   - GUARDRAIL 1: Least-privilege permissions
+#   - GUARDRAIL 2: Concurrency control per environment
+#   - GUARDRAIL 3: Timeout limits on every job
+#   - GUARDRAIL 4: Input validation with strict regex
+#   - GUARDRAIL 5: Immutable artifact verification
+#   - GUARDRAIL 6: SHA-pinned actions (no mutable tags)
+#   - GUARDRAIL 7: Environment protection rules
+
+name: "15 - Pipeline Guardrails"
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "Application name (alphanumeric and hyphens only)"
+        type: string
+      image_tag:
+        description: "Image tag in name:sha format"
+        type: string
+        default: "workshop-demo:abc12345"
+      environment:
+        description: "Target deployment environment"
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+
+# ------------------------------------------------------------------
+# GUARDRAIL 1: Least-Privilege Permissions
+#
+# Explicitly declare the minimum permissions this workflow needs.
+# Everything else is implicitly denied. This limits blast radius
+# if a step is compromised or a dependency is malicious.
+# ------------------------------------------------------------------
+permissions:
+  contents: read
+  deployments: write
+
+# ------------------------------------------------------------------
+# GUARDRAIL 2: Concurrency Control
+#
+# Only one deployment per environment can run at a time.
+# cancel-in-progress is false so a running deploy is never killed
+# mid-rollout -- the new run queues until the current one finishes.
+# ------------------------------------------------------------------
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------
+  # GUARDRAIL 3 + 4: Timeout and Input Validation
+  # --------------------------------------------------------
+  validate-inputs:
+    name: "Validate Inputs"
+    runs-on: ubuntu-latest
+    # GUARDRAIL 3: Timeout -- fail fast if validation hangs
+    timeout-minutes: 5
+    steps:
+      # GUARDRAIL 4: Input Validation
+      - name: Validate app_name
+        run: |
+          echo "================================================"
+          echo "  GUARDRAIL 4: Input Validation"
+          echo "================================================"
+          echo ""
+          APP_NAME="${{ github.event.inputs.app_name }}"
+          echo "Validating app_name: '$APP_NAME'"
+          echo ""
+
+          # Must be alphanumeric with hyphens, 1-63 characters
+          if [[ ! "$APP_NAME" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+            echo "FAILED: app_name must match ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\$"
+            echo ""
+            echo "Rules:"
+            echo "  - Lowercase alphanumeric and hyphens only"
+            echo "  - Must start and end with alphanumeric character"
+            echo "  - 1 to 63 characters long"
+            exit 1
+          fi
+          echo "PASSED: app_name is valid"
+
+      - name: Validate image_tag
+        run: |
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          echo "Validating image_tag: '$IMAGE_TAG'"
+          echo ""
+
+          # Must be in name:sha format (name:8+ hex chars)
+          if [[ ! "$IMAGE_TAG" =~ ^[a-z0-9._-]+:[a-f0-9]{8,}$ ]]; then
+            echo "FAILED: image_tag must match ^[a-z0-9._-]+:[a-f0-9]{8,}\$"
+            echo ""
+            echo "Rules:"
+            echo "  - Format: name:sha"
+            echo "  - Name: lowercase alphanumeric, dots, hyphens, underscores"
+            echo "  - Tag: at least 8 hex characters (commit SHA prefix)"
+            exit 1
+          fi
+          echo "PASSED: image_tag is valid"
+
+      - name: Validate environment
+        run: |
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          echo "Validating environment: '$ENVIRONMENT'"
+          echo ""
+
+          case "$ENVIRONMENT" in
+            dev|staging|production)
+              echo "PASSED: environment is a known value"
+              ;;
+            *)
+              echo "FAILED: environment must be one of: dev, staging, production"
+              exit 1
+              ;;
+          esac
+
+          echo ""
+          echo "All inputs validated successfully"
+
+  # --------------------------------------------------------
+  # GUARDRAIL 5 + 6: Immutable Artifacts and SHA-Pinned Actions
+  # --------------------------------------------------------
+  verify-artifact:
+    name: "Verify Artifact"
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # GUARDRAIL 6: SHA-Pinned Actions
+      #
+      # Instead of actions/checkout@v4 (a mutable tag that can be
+      # moved to point at any commit), we pin to the exact commit SHA.
+      # This ensures the action code never changes without an explicit
+      # update in this file.
+      - name: Checkout (SHA-pinned)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # GUARDRAIL 5: Immutable Artifact Verification
+      - name: Verify artifact immutability
+        run: |
+          echo "================================================"
+          echo "  GUARDRAIL 5: Immutable Artifact Verification"
+          echo "================================================"
+          echo ""
+          echo "Image: ${{ github.event.inputs.image_tag }}"
+          echo ""
+
+          echo "--- Digest Verification ---"
+          echo "  Computing image digest..."
+          sleep 1
+          DIGEST="sha256:$(echo -n "${{ github.event.inputs.image_tag }}" | sha256sum | cut -d' ' -f1)"
+          echo "  Digest: $DIGEST"
+          echo "  [PASS] Digest matches registry manifest"
+          echo ""
+
+          echo "--- Signature Verification ---"
+          echo "  Verifying cosign signature..."
+          sleep 1
+          echo "  [PASS] Signature valid (signed by CI service account)"
+          echo ""
+
+          echo "--- SBOM Verification ---"
+          echo "  Checking attached SBOM attestation..."
+          sleep 1
+          echo "  [PASS] SBOM present and signed"
+          echo "  [PASS] No critical CVEs in SBOM components"
+          echo ""
+
+          echo "Artifact verification complete"
+          echo ""
+          echo "Why this matters: The image deployed is cryptographically"
+          echo "proven to be the same image that was built and scanned."
+          echo "No one can swap the artifact between build and deploy."
+
+  # --------------------------------------------------------
+  # GUARDRAIL 7: Environment Protection Rules + Deploy
+  # --------------------------------------------------------
+  deploy:
+    name: "Deploy to ${{ github.event.inputs.environment }}"
+    needs: [validate-inputs, verify-artifact]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # GUARDRAIL 7: Environment Protection Rules
+    #
+    # The environment setting activates GitHub's built-in protection:
+    #   - Required reviewers (manual approval gates)
+    #   - Wait timers (delay before deployment proceeds)
+    #   - Deployment branch restrictions
+    #   - Custom deployment protection rules via API
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Deploy with all guardrails active
+        run: |
+          echo "================================================"
+          echo "  Deploying with All 7 Guardrails Active"
+          echo "================================================"
+          echo ""
+          echo "Application:  ${{ github.event.inputs.app_name }}"
+          echo "Image:        ${{ github.event.inputs.image_tag }}"
+          echo "Environment:  ${{ github.event.inputs.environment }}"
+          echo "Actor:        ${{ github.actor }}"
+          echo ""
+          echo "--- Active Guardrails ---"
+          echo ""
+          echo "  1. Least-privilege permissions    (contents: read, deployments: write)"
+          echo "  2. Concurrency control            (one deploy per environment)"
+          echo "  3. Timeout limits                  (30 min max for this job)"
+          echo "  4. Input validation               (regex-checked app_name, image_tag, environment)"
+          echo "  5. Immutable artifact             (digest + signature + SBOM verified)"
+          echo "  6. SHA-pinned actions             (checkout pinned to exact commit)"
+          echo "  7. Environment protection rules   (${{ github.event.inputs.environment }} protections active)"
+          echo ""
+          echo "Deploying..."
+          sleep 2
+          echo "Deployment complete"
+
+  # --------------------------------------------------------
+  # Summary
+  # --------------------------------------------------------
+  guardrails-summary:
+    name: "Guardrails Summary"
+    needs: [validate-inputs, verify-artifact, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          # Pipeline Guardrails Summary
+
+          ## The 7 Guardrails
+
+          | # | Guardrail | Where Configured | What It Prevents |
+          |---|-----------|-----------------|------------------|
+          | 1 | **Least-privilege permissions** | `permissions:` block at workflow level | Compromised step cannot access resources beyond read/deploy |
+          | 2 | **Concurrency control** | `concurrency:` block with `cancel-in-progress: false` | Two deployments to the same environment at the same time |
+          | 3 | **Timeout limits** | `timeout-minutes:` on every job | Hung jobs consuming runners indefinitely |
+          | 4 | **Input validation** | Regex checks in `validate-inputs` job | Injection attacks, malformed values reaching deployment |
+          | 5 | **Immutable artifacts** | Digest, signature, and SBOM verification | Artifact tampering between build and deploy |
+          | 6 | **SHA-pinned actions** | Full commit SHA in `uses:` instead of tag | Supply-chain attacks via compromised action tags |
+          | 7 | **Environment protection rules** | `environment:` field + repo/org settings | Unauthorized deployments, missing approvals |
+
+          ## CODEOWNERS Enforcement
+
+          Guardrails are only effective if they cannot be silently removed. Use `CODEOWNERS`
+          to require review from the security or platform team when workflow files change:
+
+          ```
+          # .github/CODEOWNERS
+          .github/workflows/   @platform-team
+          .github/workflows/*guardrail*  @security-team @platform-team
+          ```
+
+          ## Additional Enterprise Guardrails
+
+          Beyond the seven demonstrated above, GitHub Enterprise offers:
+
+          - **Allowed actions list** -- restrict which actions an organization can use
+          - **IP allow lists** -- limit which networks can trigger workflows
+          - **Audit log streaming** -- send all workflow events to SIEM for monitoring
+          - **Runner group ACLs** -- control which repositories can use which runners
+          - **Deploy keys** -- scope repository access to specific automation credentials
+          - **Required workflows** -- force every repo in the org to run a specific workflow
+          - **Custom deployment protection rules** -- integrate external approval systems via API
+          EOF
+
+          echo "Summary written to GITHUB_STEP_SUMMARY"

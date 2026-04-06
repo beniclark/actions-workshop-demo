@@ -1,0 +1,170 @@
+# Reusable Deploy Workflow
+# This workflow handles deployment to any environment. It demonstrates
+# dynamic environment binding, deployment verification, and automatic
+# rollback on failure. Designed to be called from orchestrator workflows.
+
+name: "09 - Reusable Deploy"
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: "Application name to deploy"
+        required: true
+        type: string
+      environment:
+        description: "Target deployment environment (e.g., staging, production)"
+        required: true
+        type: string
+      image_tag:
+        description: "Container image tag to deploy"
+        required: true
+        type: string
+      namespace:
+        description: "Kubernetes namespace for deployment"
+        required: false
+        type: string
+      health_check_url:
+        description: "URL to check after deployment for health verification"
+        required: false
+        type: string
+      run_smoke_tests:
+        description: "Whether to run smoke tests after deployment"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      deploy_token:
+        description: "Token used for authenticating with the deployment target"
+        required: true
+      kubeconfig:
+        description: "Kubernetes config for cluster access"
+        required: false
+    outputs:
+      deployed:
+        description: "Whether the deployment was successful"
+        value: ${{ jobs.deploy.outputs.deployed }}
+      deploy_url:
+        description: "URL of the deployed application"
+        value: ${{ jobs.deploy.outputs.deploy_url }}
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: [self-hosted, linux]
+    # Dynamic environment binding allows GitHub environment protections
+    # (required reviewers, wait timers, etc.) to be applied based on
+    # the caller's input.
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.deploy.outputs.deploy_url }}
+    outputs:
+      deployed: ${{ steps.deploy.outputs.success }}
+      deploy_url: ${{ steps.deploy.outputs.deploy_url }}
+
+    steps:
+      # Pre-deployment validation ensures all required parameters
+      # are present and the environment is in a known-good state
+      # before making changes.
+      - name: Pre-deployment validation
+        id: validate
+        run: |
+          echo "Validating deployment parameters..."
+          echo "  App:         ${{ inputs.app_name }}"
+          echo "  Environment: ${{ inputs.environment }}"
+          echo "  Image:       ${{ inputs.image_tag }}"
+          echo "  Namespace:   ${{ inputs.namespace || 'default' }}"
+
+          # Validate required inputs
+          if [ -z "${{ inputs.app_name }}" ]; then
+            echo "ERROR: app_name is required"
+            exit 1
+          fi
+
+          if [ -z "${{ inputs.image_tag }}" ]; then
+            echo "ERROR: image_tag is required"
+            exit 1
+          fi
+
+          NAMESPACE="${{ inputs.namespace || 'default' }}"
+          echo "namespace=${NAMESPACE}" >> "$GITHUB_OUTPUT"
+          echo "Pre-deployment validation passed"
+
+      # Deploy the application using kubectl
+      # In a real pipeline, this would apply manifests or use Helm.
+      - name: Deploy application
+        id: deploy
+        run: |
+          echo "Deploying ${{ inputs.app_name }} to ${{ inputs.environment }}..."
+
+          NAMESPACE="${{ steps.validate.outputs.namespace }}"
+          DEPLOY_URL="https://${{ inputs.app_name }}.${{ inputs.environment }}.example.com"
+
+          # In production, you would run real deployment commands:
+          #   kubectl set image deployment/${{ inputs.app_name }} \
+          #     app=${{ inputs.image_tag }} \
+          #     -n ${NAMESPACE}
+          echo "Simulating: kubectl set image deployment/${{ inputs.app_name }} app=${{ inputs.image_tag }} -n ${NAMESPACE}"
+
+          echo "Waiting for rollout to complete..."
+          # kubectl rollout status deployment/${{ inputs.app_name }} -n ${NAMESPACE} --timeout=300s
+          echo "Simulating rollout status check..."
+
+          echo "success=true" >> "$GITHUB_OUTPUT"
+          echo "deploy_url=${DEPLOY_URL}" >> "$GITHUB_OUTPUT"
+          echo "Deployment completed successfully"
+
+      # Post-deploy verification runs smoke tests and health checks
+      # to confirm the deployment is functioning correctly.
+      - name: Post-deploy verification
+        id: verify
+        if: inputs.run_smoke_tests
+        run: |
+          echo "Running post-deployment verification..."
+
+          # Health check
+          if [ -n "${{ inputs.health_check_url }}" ]; then
+            echo "Checking health endpoint: ${{ inputs.health_check_url }}"
+            # curl -sf "${{ inputs.health_check_url }}" || exit 1
+            echo "Simulating health check... OK"
+          fi
+
+          # Smoke tests
+          echo "Running smoke tests against ${{ inputs.environment }}..."
+          echo "  - API connectivity: OK"
+          echo "  - Authentication flow: OK"
+          echo "  - Core functionality: OK"
+          echo "Post-deploy verification passed"
+
+      # Rollback step executes if the deployment or verification fails.
+      # It restores the previous version to minimize downtime.
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed - initiating rollback..."
+
+          NAMESPACE="${{ steps.validate.outputs.namespace }}"
+
+          # In production, you would run:
+          #   kubectl rollout undo deployment/${{ inputs.app_name }} -n ${NAMESPACE}
+          echo "Simulating: kubectl rollout undo deployment/${{ inputs.app_name }} -n ${NAMESPACE}"
+
+          echo "Rollback completed"
+
+      # Deployment report is written to GITHUB_STEP_SUMMARY for
+      # visibility in the Actions UI.
+      - name: Deployment report
+        if: always()
+        run: |
+          echo "## Deployment Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Application | \`${{ inputs.app_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | \`${{ inputs.environment }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image Tag | \`${{ inputs.image_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Namespace | \`${{ steps.validate.outputs.namespace }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy URL | ${{ steps.deploy.outputs.deploy_url }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | ${{ steps.deploy.outputs.success == 'true' && 'Successful' || 'Failed' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Triggered by: \`${{ github.actor }}\` via \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"

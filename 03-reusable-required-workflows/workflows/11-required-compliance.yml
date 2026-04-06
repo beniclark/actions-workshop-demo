@@ -1,0 +1,244 @@
+# Required Compliance Workflow
+# This workflow enforces organizational compliance policies on pull
+# requests. It checks licenses, security policies, code quality
+# gates, and produces an audit trail. Can also be called as a
+# reusable workflow with a strict_mode option.
+#
+# When used as a required status check, this ensures all PRs meet
+# minimum compliance standards before merging.
+
+name: "11 - Required Compliance"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_call:
+    inputs:
+      strict_mode:
+        description: "Enable strict compliance checking"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # License check ensures all dependencies use approved licenses.
+  # This prevents introducing copyleft or restrictive licenses
+  # that conflict with the project's licensing requirements.
+  license-check:
+    name: License Compliance
+    runs-on: [self-hosted, linux]
+    outputs:
+      passed: ${{ steps.check.outputs.passed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check dependency licenses
+        id: check
+        run: |
+          echo "Checking dependency licenses..."
+
+          # Define approved and blocked license lists
+          APPROVED="MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC"
+          BLOCKED="GPL-3.0,AGPL-3.0,SSPL"
+
+          echo "Approved licenses: ${APPROVED}"
+          echo "Blocked licenses: ${BLOCKED}"
+
+          # In production, you would use real license checking tools:
+          #   pip-licenses --allow-only="${APPROVED}"
+          #   license-checker --failOn "${BLOCKED}"
+          echo "Simulating license scan of dependencies..."
+
+          VIOLATION_COUNT=0
+          echo "Checking Python dependencies..."
+          echo "  - requests: MIT (approved)"
+          echo "  - flask: BSD-3-Clause (approved)"
+          echo "  - pytest: MIT (approved)"
+
+          if [ "${VIOLATION_COUNT}" -eq 0 ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            echo "All dependency licenses are compliant"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            echo "Found ${VIOLATION_COUNT} license violations"
+            exit 1
+          fi
+
+  # Security policy check verifies that required security
+  # documentation and configurations are in place.
+  security-policy:
+    name: Security Policy
+    runs-on: [self-hosted, linux]
+    outputs:
+      passed: ${{ steps.check.outputs.passed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify security policies
+        id: check
+        run: |
+          FAILURES=0
+
+          # Check for SECURITY.md
+          echo "Checking for SECURITY.md..."
+          if [ -f "SECURITY.md" ]; then
+            echo "  SECURITY.md exists"
+          else
+            echo "  WARNING: SECURITY.md not found"
+            FAILURES=$((FAILURES + 1))
+          fi
+
+          # Check for CODEOWNERS
+          echo "Checking for CODEOWNERS..."
+          if [ -f "CODEOWNERS" ] || [ -f ".github/CODEOWNERS" ] || [ -f "docs/CODEOWNERS" ]; then
+            echo "  CODEOWNERS file exists"
+          else
+            echo "  WARNING: CODEOWNERS file not found"
+            FAILURES=$((FAILURES + 1))
+          fi
+
+          # Check branch protection (simulated)
+          # In production, you would use the GitHub API:
+          #   gh api repos/${{ github.repository }}/branches/main/protection
+          echo "Checking branch protection configuration..."
+          echo "  Simulating branch protection verification..."
+          echo "  Branch protection is configured"
+
+          if [ "${FAILURES}" -eq 0 ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            echo "All security policies verified"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            echo "Found ${FAILURES} security policy issues"
+          fi
+
+  # Code quality gates check PR size and required files to
+  # maintain code review quality and repository standards.
+  code-quality:
+    name: Code Quality Gates
+    runs-on: [self-hosted, linux]
+    outputs:
+      passed: ${{ steps.check.outputs.passed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check code quality gates
+        id: check
+        run: |
+          WARNINGS=0
+          FAILURES=0
+
+          # Check PR size (number of changed files)
+          echo "Checking PR size..."
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+            echo "  Changed files: ${CHANGED_FILES}"
+
+            if [ "${CHANGED_FILES}" -gt 50 ]; then
+              echo "  WARNING: PR has more than 50 changed files (${CHANGED_FILES})"
+              echo "  Consider breaking this into smaller PRs for easier review"
+              WARNINGS=$((WARNINGS + 1))
+            else
+              echo "  PR size is within acceptable limits"
+            fi
+          else
+            echo "  Skipping PR size check (not a pull request event)"
+          fi
+
+          # Check for required files
+          echo "Checking for required files..."
+
+          if [ -f "CODEOWNERS" ] || [ -f ".github/CODEOWNERS" ]; then
+            echo "  CODEOWNERS: found"
+          else
+            echo "  CODEOWNERS: missing"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          if [ -f "README.md" ]; then
+            echo "  README.md: found"
+          else
+            echo "  README.md: missing"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          if [ "${FAILURES}" -eq 0 ]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            if [ "${WARNINGS}" -gt 0 ]; then
+              echo "Code quality gates passed with ${WARNINGS} warning(s)"
+            else
+              echo "All code quality gates passed"
+            fi
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            echo "Code quality gates failed with ${FAILURES} failure(s)"
+            exit 1
+          fi
+
+  # Audit log generates a compliance record for every PR check.
+  # This runs regardless of whether other jobs passed or failed
+  # to ensure a complete audit trail.
+  audit-log:
+    name: Audit Log
+    needs: [license-check, security-policy, code-quality]
+    if: always()
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Generate audit record
+        run: |
+          echo "Generating compliance audit record..."
+          echo ""
+          echo "=== Audit Record ==="
+          echo "Repository:   ${{ github.repository }}"
+          echo "PR Number:    ${{ github.event.pull_request.number || 'N/A' }}"
+          echo "Author:       ${{ github.actor }}"
+          echo "Base Branch:  ${{ github.base_ref || github.ref_name }}"
+          echo "Head SHA:     ${{ github.sha }}"
+          echo "Timestamp:    $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo ""
+          echo "Gate Results:"
+          echo "  License Check:   ${{ needs.license-check.result }}"
+          echo "  Security Policy: ${{ needs.security-policy.result }}"
+          echo "  Code Quality:    ${{ needs.code-quality.result }}"
+          echo "==================="
+
+      - name: Compliance summary
+        if: always()
+        run: |
+          LICENSE_RESULT="${{ needs.license-check.result }}"
+          SECURITY_RESULT="${{ needs.security-policy.result }}"
+          QUALITY_RESULT="${{ needs.code-quality.result }}"
+
+          # Determine overall compliance status
+          if [ "${LICENSE_RESULT}" == "success" ] && [ "${SECURITY_RESULT}" == "success" ] && [ "${QUALITY_RESULT}" == "success" ]; then
+            OVERALL="Compliant"
+          else
+            OVERALL="Non-Compliant"
+          fi
+
+          echo "## Compliance Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Result | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| License Compliance | \`${LICENSE_RESULT}\` | $([ '${LICENSE_RESULT}' == 'success' ] && echo 'Passed' || echo 'Review Required') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security Policy | \`${SECURITY_RESULT}\` | $([ '${SECURITY_RESULT}' == 'success' ] && echo 'Passed' || echo 'Review Required') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Code Quality | \`${QUALITY_RESULT}\` | $([ '${QUALITY_RESULT}' == 'success' ] && echo 'Passed' || echo 'Review Required') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Overall: ${OVERALL}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repository | \`${{ github.repository }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| PR | \`#${{ github.event.pull_request.number || 'N/A' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Author | \`${{ github.actor }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Timestamp | \`$(date -u '+%Y-%m-%dT%H:%M:%SZ')\` |" >> "$GITHUB_STEP_SUMMARY"

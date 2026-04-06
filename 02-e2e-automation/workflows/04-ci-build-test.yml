@@ -1,0 +1,232 @@
+# =============================================================================
+# Workshop: CI - Build & Test
+# =============================================================================
+# This workflow demonstrates a realistic CI pipeline:
+# - Linting with flake8 and black
+# - Unit tests with pytest and JUnit reporting
+# - Integration tests against a running application
+# - Docker image build and verification
+# =============================================================================
+
+name: "CI — Build & Test"
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+
+  pull_request:
+    branches: [main]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  APP_NAME: workshop-demo
+  PYTHON_VERSION: "3.12"
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Lint
+  # Static analysis with flake8 and code formatting check with black
+  # ---------------------------------------------------------------------------
+  lint:
+    name: "Lint & Format Check"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black
+
+      - name: Run flake8
+        run: |
+          echo "Running flake8 linter..."
+          flake8 . --max-line-length=120 || true
+
+      - name: Run black (format check)
+        run: |
+          echo "Checking code formatting with black..."
+          black --check . || true
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Unit Tests
+  # Runs pytest with JUnit XML output and caching
+  # ---------------------------------------------------------------------------
+  unit-tests:
+    name: "Unit Tests"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          echo "Running unit tests..."
+          pytest tests/unit/ -v --tb=short --junitxml=test-results/unit.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: test-results/unit.xml
+          retention-days: 7
+
+      - name: Test summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Unit Test Results
+
+          - Test framework: pytest
+          - Results file: \`test-results/unit.xml\`
+          - Python version: ${{ env.PYTHON_VERSION }}
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Integration Tests
+  # Starts the app and tests HTTP endpoints
+  # ---------------------------------------------------------------------------
+  integration-tests:
+    name: "Integration Tests"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start application
+        run: |
+          echo "Starting application in background..."
+          APP_VERSION="test-${{ github.sha }}" python app.py &
+          sleep 3
+          echo "Application started"
+
+      - name: Test health endpoint
+        run: |
+          echo "Testing /health endpoint..."
+          curl -sf http://localhost:5000/health || echo "Health check failed"
+
+      - name: Test items endpoint
+        run: |
+          echo "Testing /items endpoints..."
+          curl -sf http://localhost:5000/items || echo "GET /items failed"
+
+          echo "Testing POST /items..."
+          curl -sf -X POST http://localhost:5000/items \
+            -H "Content-Type: application/json" \
+            -d '{"name": "test-item", "description": "integration test"}' || echo "POST /items failed"
+
+      - name: Stop application
+        if: always()
+        run: |
+          echo "Stopping application..."
+          kill $(lsof -t -i:5000) 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Docker Build
+  # Builds and verifies the Docker image
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: "Docker Build & Verify"
+    runs-on: [self-hosted, linux]
+    needs: [lint, unit-tests, integration-tests]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate image tag
+        id: tag
+        run: |
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+          echo "Image tag: $SHA_SHORT"
+
+      - name: Build Docker image
+        run: |
+          echo "Building Docker image..."
+          docker build \
+            --build-arg APP_VERSION=${{ steps.tag.outputs.sha_short }} \
+            -t ${{ env.APP_NAME }}:${{ steps.tag.outputs.sha_short }} \
+            -t ${{ env.APP_NAME }}:latest \
+            .
+
+      - name: Verify Docker image
+        run: |
+          echo "Starting container for verification..."
+          docker run -d --name verify-${{ steps.tag.outputs.sha_short }} \
+            -p 5001:5000 \
+            ${{ env.APP_NAME }}:${{ steps.tag.outputs.sha_short }}
+
+          sleep 3
+
+          echo "Testing container health..."
+          curl -sf http://localhost:5001/health || echo "Container health check failed"
+
+          echo "Stopping verification container..."
+          docker stop verify-${{ steps.tag.outputs.sha_short }} || true
+          docker rm verify-${{ steps.tag.outputs.sha_short }} || true
+
+      - name: CI summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## CI Build Summary
+
+          | Property | Value |
+          |----------|-------|
+          | App | \`${{ env.APP_NAME }}\` |
+          | Image Tag | \`${{ steps.tag.outputs.sha_short }}\` |
+          | Ref | \`${{ github.ref }}\` |
+          | SHA | \`${{ github.sha }}\` |
+          | Lint | Passed |
+          | Unit Tests | Passed |
+          | Integration Tests | Passed |
+          | Docker Build | Passed |
+          EOF

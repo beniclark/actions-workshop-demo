@@ -1,0 +1,6 @@
+# Platform team must review workflow and action changes
+.github/workflows/    @platform-team
+.github/actions/      @platform-team
+
+# Security team reviews Dockerfile changes
+Dockerfile            @platform-team @security-team

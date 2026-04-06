@@ -1,0 +1,164 @@
+# Reusable Security Scan Workflow
+# This workflow performs multiple security scanning stages and can be
+# composed into larger pipelines. It demonstrates conditional step
+# execution based on scan_type input and generates a summary report.
+#
+# Scan types: "full", "dependencies", "container", "secrets", "sast"
+# A "full" scan runs all stages.
+
+name: "08 - Reusable Security Scan"
+
+on:
+  workflow_call:
+    inputs:
+      scan_type:
+        description: "Type of scan to run: full, dependencies, container, secrets, sast"
+        required: false
+        type: string
+        default: "full"
+      image_tag:
+        description: "Container image tag to scan (required for container scanning)"
+        required: false
+        type: string
+      fail_on_critical:
+        description: "Whether to fail the workflow if critical findings are detected"
+        required: false
+        type: boolean
+        default: true
+      working_directory:
+        description: "Directory containing the application code"
+        required: false
+        type: string
+        default: "."
+    outputs:
+      scan_passed:
+        description: "Whether all scans passed"
+        value: ${{ jobs.security-scan.outputs.scan_passed }}
+      findings_count:
+        description: "Total number of findings across all scans"
+        value: ${{ jobs.security-scan.outputs.findings_count }}
+
+jobs:
+  security-scan:
+    name: Security Scan (${{ inputs.scan_type }})
+    runs-on: [self-hosted, linux]
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    outputs:
+      scan_passed: ${{ steps.summary.outputs.scan_passed }}
+      findings_count: ${{ steps.summary.outputs.total_findings }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Dependency scanning checks third-party packages for known
+      # vulnerabilities. This runs for "full" or "dependencies" scan types.
+      - name: Dependency scan
+        id: dependency_scan
+        if: inputs.scan_type == 'full' || inputs.scan_type == 'dependencies'
+        run: |
+          echo "Running dependency vulnerability scan..."
+
+          # In production, you would use real tools:
+          #   pip-audit --requirement requirements.txt
+          #   npm audit --production
+          #   trivy fs --scanners vuln .
+          echo "Simulating pip-audit scan..."
+          echo "Simulating npm audit scan..."
+          echo "Simulating trivy filesystem scan..."
+
+          # Simulated findings count
+          echo "findings=2" >> "$GITHUB_OUTPUT"
+          echo "Dependency scan complete - found 2 findings"
+
+      # Container image scanning checks the built image for OS-level
+      # and application vulnerabilities. Requires an image_tag input.
+      - name: Container image scan
+        id: container_scan
+        if: (inputs.scan_type == 'full' || inputs.scan_type == 'container') && inputs.image_tag != ''
+        run: |
+          echo "Scanning container image: ${{ inputs.image_tag }}"
+
+          # In production, you would use real tools:
+          #   trivy image --severity HIGH,CRITICAL ${{ inputs.image_tag }}
+          #   grype ${{ inputs.image_tag }}
+          echo "Simulating trivy image scan..."
+          echo "Simulating grype image scan..."
+
+          # Simulated findings count
+          echo "findings=0" >> "$GITHUB_OUTPUT"
+          echo "Container scan complete - found 0 findings"
+
+      # Secret detection scans the codebase for accidentally committed
+      # credentials, API keys, and other sensitive data.
+      - name: Secret detection
+        id: secret_scan
+        if: inputs.scan_type == 'full' || inputs.scan_type == 'secrets'
+        run: |
+          echo "Running secret detection scan..."
+
+          # In production, you would use real tools:
+          #   gitleaks detect --source . --verbose
+          #   trufflehog filesystem . --only-verified
+          echo "Simulating gitleaks scan..."
+          echo "Simulating trufflehog scan..."
+
+          # Simulated findings count
+          echo "findings=0" >> "$GITHUB_OUTPUT"
+          echo "Secret detection complete - found 0 findings"
+
+      # Static Application Security Testing (SAST) analyzes source code
+      # for security vulnerabilities without executing it.
+      - name: SAST analysis
+        id: sast_scan
+        if: inputs.scan_type == 'full'
+        run: |
+          echo "Running static analysis security scan..."
+
+          # In production, you would use real tools:
+          #   semgrep --config=auto .
+          #   codeql analyze --format=sarif
+          echo "Simulating semgrep scan..."
+          echo "Simulating CodeQL scan..."
+
+          # Simulated findings count
+          echo "findings=1" >> "$GITHUB_OUTPUT"
+          echo "SAST scan complete - found 1 finding"
+
+      # Summary aggregates all scan results and produces a report.
+      # Uses GITHUB_STEP_SUMMARY for a rich markdown report in the
+      # Actions UI.
+      - name: Security scan summary
+        id: summary
+        if: always()
+        run: |
+          DEP_FINDINGS=${{ steps.dependency_scan.outputs.findings || 0 }}
+          CONTAINER_FINDINGS=${{ steps.container_scan.outputs.findings || 0 }}
+          SECRET_FINDINGS=${{ steps.secret_scan.outputs.findings || 0 }}
+          SAST_FINDINGS=${{ steps.sast_scan.outputs.findings || 0 }}
+
+          TOTAL=$((DEP_FINDINGS + CONTAINER_FINDINGS + SECRET_FINDINGS + SAST_FINDINGS))
+          echo "total_findings=${TOTAL}" >> "$GITHUB_OUTPUT"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "scan_passed=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.fail_on_critical }}" == "true" ] && [ "$TOTAL" -gt 5 ]; then
+            echo "scan_passed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "scan_passed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "## Security Scan Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scan Type | Findings | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|----------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dependency Scan | ${DEP_FINDINGS} | $([ ${DEP_FINDINGS} -eq 0 ] && echo 'Passed' || echo 'Warning') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Container Scan | ${CONTAINER_FINDINGS} | $([ ${CONTAINER_FINDINGS} -eq 0 ] && echo 'Passed' || echo 'Warning') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Secret Detection | ${SECRET_FINDINGS} | $([ ${SECRET_FINDINGS} -eq 0 ] && echo 'Passed' || echo 'Warning') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SAST Analysis | ${SAST_FINDINGS} | $([ ${SAST_FINDINGS} -eq 0 ] && echo 'Passed' || echo 'Warning') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Total Findings: ${TOTAL}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Scan type: \`${{ inputs.scan_type }}\`" >> "$GITHUB_STEP_SUMMARY"
