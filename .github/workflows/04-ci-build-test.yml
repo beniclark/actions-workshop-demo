@@ -72,6 +72,8 @@ jobs:
   unit-tests:
     name: "Unit Tests"
     runs-on: [self-hosted, linux]
+    env:
+      PYTHONPATH: .
 
     steps:
       - name: Checkout code

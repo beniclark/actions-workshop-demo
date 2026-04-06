@@ -54,6 +54,8 @@ jobs:
     defaults:
       run:
         working-directory: ${{ inputs.working_directory }}
+    env:
+      PYTHONPATH: ${{ inputs.working_directory }}
     outputs:
       image_tag: ${{ steps.metadata.outputs.image_tag }}
       test_passed: ${{ steps.tests.outputs.passed }}

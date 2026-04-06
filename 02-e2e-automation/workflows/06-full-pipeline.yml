@@ -51,6 +51,8 @@ jobs:
   build-and-test:
     name: "Build & Test"
     runs-on: [self-hosted, linux]
+    env:
+      PYTHONPATH: .
     outputs:
       image_tag: ${{ steps.tag.outputs.image_tag }}
 
