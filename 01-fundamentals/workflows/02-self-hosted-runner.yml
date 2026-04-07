@@ -8,7 +8,7 @@
 # - Security best practices
 # =============================================================================
 
-name: "Self-Hosted Runner Demo"
+name: "02 - Self-Hosted Runner Demo"
 
 on:
   workflow_dispatch:

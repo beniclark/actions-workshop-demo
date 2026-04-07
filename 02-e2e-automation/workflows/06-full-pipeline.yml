@@ -12,7 +12,7 @@
 # is better for larger teams and complex pipelines.
 # =============================================================================
 
-name: "Full Pipeline"
+name: "06 - Full Pipeline"
 
 on:
   workflow_dispatch:
