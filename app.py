@@ -12,6 +12,7 @@ app = Flask(__name__)
 items = [
     {"id": 1, "name": "Widget A", "status": "active"},
     {"id": 2, "name": "Widget B", "status": "active"},
+    {"id": 3, "name": "Widget C", "status": "active"},
 ]
 
 
