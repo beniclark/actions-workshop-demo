@@ -65,20 +65,24 @@ jobs:
     steps:
       - name: Classify issue content
         id: classify
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           echo "============================================"
           echo "  Issue Classification Engine"
           echo "============================================"
           echo ""
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             # Demo mode — simulate an issue
             TITLE="API returns 500 on large payloads"
             BODY="When sending more than 1MB to POST /api/items, the server returns a 500 error. Stack trace attached."
             echo "  [Demo Mode] Simulating issue classification"
           else
-            TITLE="${{ github.event.issue.title }}"
-            BODY="${{ github.event.issue.body }}"
+            TITLE="$ISSUE_TITLE"
+            BODY="$ISSUE_BODY"
           fi
 
           echo "  Title: ${TITLE}"
