@@ -4,7 +4,11 @@ Provides a simple REST API with health check, items CRUD, and version info.
 """
 
 import os
+import logging
 from flask import Flask, jsonify, request
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -12,6 +16,7 @@ app = Flask(__name__)
 items = [
     {"id": 1, "name": "Widget A", "status": "active"},
     {"id": 2, "name": "Widget B", "status": "active"},
+    {"id": 3, "name": "Widget C", "status": "active"},
 ]
 
 
