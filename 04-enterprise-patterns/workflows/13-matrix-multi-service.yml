@@ -34,7 +34,7 @@ jobs:
   # --------------------------------------------------------
   detect-changes:
     name: "Detect Changes"
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       service-count: ${{ steps.set-matrix.outputs.service_count }}
@@ -127,7 +127,7 @@ jobs:
   build-service:
     name: "Build ${{ matrix.service }}"
     needs: detect-changes
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     strategy:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
       fail-fast: false
@@ -221,7 +221,7 @@ jobs:
   integration-gate:
     name: "Integration Gate"
     needs: build-service
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     steps:
       - name: Confirm all services built
         run: |

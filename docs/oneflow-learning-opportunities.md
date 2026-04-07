@@ -95,6 +95,46 @@ Each section below covers a pattern demonstrated in the workshop. For each patte
 
 ---
 
+## 9. Event-Driven Issue Triage Automation
+
+**What it does:** Automatically classify, label, and route issues based on content analysis. Posts welcome comments and sets SLA expectations. Reacts to `issues` and `issue_comment` events — no CI/CD triggers involved.
+
+**Workshop demo:** [`16-issue-triage.yml`](../.github/workflows/16-issue-triage.yml)
+
+**Discussion prompt:** What triage rules are currently handled manually by your team? Could keyword classification (or an internal ML model) automate intake across repos? Should OneFlow publish a standard triage workflow that teams can configure with their own routing rules?
+
+---
+
+## 10. Scheduled Operational Automation
+
+**What it does:** Cron-driven workflows that run governance checks, dependency audits, and stale issue reports on a schedule. Generates dashboards via `GITHUB_STEP_SUMMARY`. Replaces manual "Monday morning check-in" routines.
+
+**Workshop demo:** [`17-scheduled-ops.yml`](../.github/workflows/17-scheduled-ops.yml)
+
+**Discussion prompt:** What operational tasks does your team perform on a recurring basis? Could repo health scores be aggregated org-wide to give leadership a governance dashboard? Should OneFlow offer a standard "repo health" reusable workflow?
+
+---
+
+## 11. Cross-Team Integration via `repository_dispatch`
+
+**What it does:** Bridges team silos using `repository_dispatch` events. When one team's tool completes (AI model updated, scan finished, tool run complete), it sends an event that triggers workflows in other repos. No shared infrastructure — just an API call.
+
+**Workshop demo:** [`18-cross-team-integration.yml`](../.github/workflows/18-cross-team-integration.yml)
+
+**Discussion prompt:** What cross-team handoffs happen through meetings or tickets today? Could `repository_dispatch` automate them? Could OneFlow publish standard event types (e.g., `scan-complete`, `model-promoted`) so that teams have a shared vocabulary for cross-team events?
+
+---
+
+## 12. Internal AI Tool Integration & Custom Actions
+
+**What it does:** Wraps internal tools (AI code review, security scanners, compliance checkers) as custom composite actions. Any team consumes them with a single `uses:` line — no third-party marketplace dependency, no Security Assessment process.
+
+**Workshop demo:** [`19-ai-tool-integration.yml`](../.github/workflows/19-ai-tool-integration.yml) + [`.github/actions/internal-tool-wrapper/`](../.github/actions/internal-tool-wrapper/action.yml)
+
+**Discussion prompt:** Which internal tools are used by multiple teams but integrated differently each time? Could wrapping them as composite actions in an org-level repository give every team access instantly? This is the inner-source model: build once, use everywhere.
+
+---
+
 ## Contributing to OneFlow
 
 OneFlow is an inner-source project. Contributions are welcome from across the organization.

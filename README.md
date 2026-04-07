@@ -9,10 +9,11 @@
 
 | Module | Topic | Duration | Focus |
 |--------|-------|----------|-------|
-| 1 | [Fundamentals Refresher](01-fundamentals/) | ~45 min | Triggers, self-hosted runners, secrets, environments |
-| 2 | [End-to-End Pipeline](02-e2e-automation/) | ~60 min | Full CI/CD pipeline with integration testing |
-| 3 | [Reusable & Required Workflows](03-reusable-required-workflows/) | ~45 min | Composable workflows, governance gates |
-| 4 | [Enterprise Patterns](04-enterprise-patterns/) | ~60 min | Promotion, matrix, separation of concerns, pipeline guardrails |
+| 1 | [Fundamentals Refresher](01-fundamentals/) | ~30 min | Triggers, self-hosted runners, secrets, environments |
+| 2 | [CI/CD Overview](02-e2e-automation/) | ~30 min | End-to-end pipeline (OneFlow-framed) |
+| 3 | [Beyond CI/CD](03-beyond-cicd/) | ~60 min | Event-driven automation, AI tool integration, cross-team workflows |
+| 4 | [Inner-Source & Reusable Workflows](03-reusable-required-workflows/) | ~45 min | Composable workflows, custom actions, governance gates |
+| 5 | [Enterprise Governance](04-enterprise-patterns/) | ~30 min | Promotion, separation of concerns, pipeline guardrails |
 
 **Total duration:** ~3.5 hours (including breaks and discussion)
 
@@ -21,8 +22,10 @@
 ## Key Themes
 
 - **Self-hosted runners first** — Every workflow targets self-hosted runners. No GitHub-hosted runner content.
+- **Beyond CI/CD** — Actions is an event platform, not just CI/CD. Demos cover issue triage, scheduled ops, cross-team integration, and AI tool automation.
+- **Internal tool integration** — Custom composite actions wrap internal tools for inner-source consumption. No third-party marketplace dependencies needed.
 - **OneFlow standard pipeline** — These demos show the underlying Actions capabilities that power OneFlow. Understanding the primitives helps developers debug, extend, and contribute to OneFlow.
-- **Inner-source contribution** — OneFlow is an inner-source project. This workshop gives developers the knowledge to propose and implement enhancements.
+- **Cross-team collaboration** — `repository_dispatch` and custom actions bridge silos between teams building AI tools, security scanners, and platform services.
 - **Enterprise governance** — Secrets management, required workflows, CODEOWNERS, environment protection rules.
 
 ---
@@ -67,32 +70,40 @@ black --check .            # Format check
 ├── .github/
 │   ├── CODEOWNERS                    # Platform team governance
 │   ├── actions/
-│   │   └── setup-python-project/     # Composite action demo
-│   └── workflows/                    # 15 runnable workflow files
-│       ├── 01-basic-ci.yml                 # Module 1
+│   │   ├── setup-python-project/     # Composite action: Python setup
+│   │   └── internal-tool-wrapper/    # Composite action: internal tool wrapper (inner-source)
+│   └── workflows/                    # 19 runnable workflow files
+│       ├── 01-basic-ci.yml                 # Module 1: Fundamentals
 │       ├── 02-self-hosted-runner.yml
 │       ├── 03-secrets-environments.yml
-│       ├── 04-ci-build-test.yml            # Module 2
+│       ├── 04-ci-build-test.yml            # Module 2: CI/CD Overview
 │       ├── 05-cd-deploy.yml
 │       ├── 06-full-pipeline.yml
-│       ├── 07-reusable-build.yml           # Module 3
+│       ├── 07-reusable-build.yml           # Module 4: Reusable Workflows
 │       ├── 08-reusable-security-scan.yml
 │       ├── 09-reusable-deploy.yml
 │       ├── 10-caller-orchestrator.yml
 │       ├── 11-required-compliance.yml
-│       ├── 12-environment-promotion.yml    # Module 4
+│       ├── 12-environment-promotion.yml    # Module 5: Enterprise Governance
 │       ├── 13-matrix-multi-service.yml
 │       ├── 14-separation-of-concerns.yml
-│       └── 15-pipeline-guardrails.yml
+│       ├── 15-pipeline-guardrails.yml
+│       ├── 16-issue-triage.yml             # Module 3: Beyond CI/CD
+│       ├── 17-scheduled-ops.yml
+│       ├── 18-cross-team-integration.yml
+│       └── 19-ai-tool-integration.yml
 │
 ├── 01-fundamentals/                  # Module 1 reference files + README
 ├── 02-e2e-automation/                # Module 2 reference files + README
-├── 03-reusable-required-workflows/   # Module 3 reference files + README
-├── 04-enterprise-patterns/           # Module 4 reference files + README
+├── 03-beyond-cicd/                   # Module 3 reference files + README (event-driven)
+├── 03-reusable-required-workflows/   # Module 4 reference files + README
+├── 04-enterprise-patterns/           # Module 5 reference files + README
 │
 ├── scripts/
 │   ├── deploy.sh                     # Mock deployment script
-│   └── smoke-test.sh                 # Mock smoke test script
+│   ├── smoke-test.sh                 # Mock smoke test script
+│   ├── mock-ai-service.sh            # Mock internal AI code review API
+│   └── send-dispatch.sh              # Helper: send repository_dispatch events
 │
 ├── config/
 │   ├── dev.env / staging.env / prod.env
@@ -158,6 +169,10 @@ flake8 .
 | 13 | Matrix Multi-Service | PR, dispatch | Dynamic service detection, fan-out/fan-in |
 | 14 | Separation of Concerns | dispatch | Team ownership model (App/Security/GRC/Platform) |
 | 15 | Pipeline Guardrails | dispatch | Least-privilege, SHA pinning, immutable artifacts |
+| 16 | Issue Triage | issues, issue_comment | Auto-label, team routing, welcome comments |
+| 17 | Scheduled Ops | schedule (cron), dispatch | Repo health, dependency audit, stale issues |
+| 18 | Cross-Team Integration | repository_dispatch | Typed events, cross-team payloads, bridging silos |
+| 19 | AI Tool Integration | PR, dispatch | Internal AI service, composite action, inner-source |
 
 ---
 

@@ -1,0 +1,308 @@
+# =============================================================================
+# Workshop: Cross-Team Integration via repository_dispatch
+# =============================================================================
+# This workflow demonstrates how teams can bridge silos using Actions:
+# - repository_dispatch for cross-repo event-driven automation
+# - Typed events with structured payloads
+# - Processing events from other teams' tools
+# - The "inner-source integration bus" pattern
+#
+# Key patterns:
+#   - repository_dispatch trigger with typed events
+#   - client_payload for structured event data
+#   - Cross-team automation without shared infrastructure
+#   - Notification and orchestration across organizational boundaries
+#
+# How it works:
+#   Team A completes a task (AI model training, security scan, tool run)
+#   → Team A sends a repository_dispatch event to Team B's repo
+#   → This workflow fires automatically and processes the event
+#   → Results are logged, notifications sent, downstream actions triggered
+#
+# To trigger this workflow:
+#   gh api repos/OWNER/REPO/dispatches \
+#     -f event_type="model-updated" \
+#     -f client_payload='{"team":"ml-platform","model":"fraud-detect-v3"}'
+#
+# Or use: scripts/send-dispatch.sh
+#
+# OneFlow tie-in: repository_dispatch is how internal platform tools
+# can integrate with OneFlow pipelines without modifying the pipeline
+# itself. A security scanner, AI model registry, or compliance tool
+# sends an event — OneFlow reacts.
+# =============================================================================
+
+name: "18 - Cross-Team Integration"
+
+# -----------------------------------------------------------------------------
+# Triggers
+# repository_dispatch fires when an external system sends an event.
+# The 'types' filter ensures we only react to events we understand.
+# -----------------------------------------------------------------------------
+on:
+  repository_dispatch:
+    types:
+      - tool-completed      # An internal tool finished its run
+      - model-updated       # An AI/ML model was updated
+      - scan-finished       # A security/compliance scan completed
+
+  # Manual trigger to simulate dispatch events for demo purposes
+  workflow_dispatch:
+    inputs:
+      event_type:
+        description: "Simulated event type"
+        type: choice
+        options:
+          - tool-completed
+          - model-updated
+          - scan-finished
+        default: model-updated
+      source_team:
+        description: "Team that sent the event"
+        type: string
+        default: "ml-platform"
+      payload_data:
+        description: "Simulated payload (key=value)"
+        type: string
+        default: "model=fraud-detect-v3,accuracy=0.97,version=3.1"
+
+permissions:
+  contents: read
+  issues: write
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Receive & Validate Event
+  # Parses the incoming event, validates the payload, and determines
+  # what downstream actions to take.
+  # ---------------------------------------------------------------------------
+  receive-event:
+    name: "Receive Event"
+    runs-on: [self-hosted, linux]
+    outputs:
+      event_type: ${{ steps.parse.outputs.event_type }}
+      source_team: ${{ steps.parse.outputs.source_team }}
+      payload_summary: ${{ steps.parse.outputs.payload_summary }}
+
+    steps:
+      - name: Parse incoming event
+        id: parse
+        run: |
+          echo "============================================"
+          echo "  Cross-Team Event Received"
+          echo "  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "============================================"
+          echo ""
+
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            EVENT_TYPE="${{ github.event.action }}"
+            SOURCE_TEAM="${{ github.event.client_payload.team || 'unknown' }}"
+            PAYLOAD='${{ toJSON(github.event.client_payload) }}'
+            echo "  Source: repository_dispatch (real event)"
+          else
+            EVENT_TYPE="${{ github.event.inputs.event_type }}"
+            SOURCE_TEAM="${{ github.event.inputs.source_team }}"
+            PAYLOAD="${{ github.event.inputs.payload_data }}"
+            echo "  Source: workflow_dispatch (simulated)"
+          fi
+
+          echo ""
+          echo "  Event type:  ${EVENT_TYPE}"
+          echo "  Source team: ${SOURCE_TEAM}"
+          echo "  Payload:     ${PAYLOAD}"
+          echo ""
+
+          # Validate event type
+          case "${EVENT_TYPE}" in
+            tool-completed|model-updated|scan-finished)
+              echo "  Event type is valid"
+              ;;
+            *)
+              echo "  ERROR: Unknown event type '${EVENT_TYPE}'"
+              exit 1
+              ;;
+          esac
+
+          echo "event_type=${EVENT_TYPE}" >> "$GITHUB_OUTPUT"
+          echo "source_team=${SOURCE_TEAM}" >> "$GITHUB_OUTPUT"
+          echo "payload_summary=${PAYLOAD}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Process Event
+  # Takes action based on the event type. In production, this is where
+  # you'd trigger downstream pipelines, update dashboards, or run tests.
+  # ---------------------------------------------------------------------------
+  process-event:
+    name: "Process Event"
+    runs-on: [self-hosted, linux]
+    needs: receive-event
+
+    steps:
+      - name: Handle event
+        run: |
+          EVENT_TYPE="${{ needs.receive-event.outputs.event_type }}"
+          SOURCE_TEAM="${{ needs.receive-event.outputs.source_team }}"
+
+          echo "============================================"
+          echo "  Processing Event: ${EVENT_TYPE}"
+          echo "============================================"
+          echo ""
+
+          case "${EVENT_TYPE}" in
+
+            model-updated)
+              echo "  An AI/ML model was updated by ${SOURCE_TEAM}"
+              echo ""
+              echo "  Downstream actions:"
+              echo "    1. Pull latest model artifact"
+              sleep 1
+              echo "       → Model artifact downloaded"
+              echo "    2. Run validation test suite"
+              sleep 1
+              echo "       → 47/47 validation tests passed"
+              echo "    3. Update model registry entry"
+              sleep 1
+              echo "       → Registry updated (fraud-detect-v3 → production)"
+              echo "    4. Trigger dependent pipeline redeployment"
+              sleep 1
+              echo "       → 3 dependent services queued for redeployment"
+              echo ""
+              echo "  This pattern bridges ML and application teams:"
+              echo "  ML team updates model → App team's pipeline reacts automatically"
+              ;;
+
+            tool-completed)
+              echo "  An internal tool completed its run (source: ${SOURCE_TEAM})"
+              echo ""
+              echo "  Downstream actions:"
+              echo "    1. Fetch tool results from artifact store"
+              sleep 1
+              echo "       → Results downloaded (142 findings)"
+              echo "    2. Parse and categorize findings"
+              sleep 1
+              echo "       → 0 critical, 3 high, 12 medium, 127 low"
+              echo "    3. Create tracking issues for high-severity items"
+              sleep 1
+              echo "       → 3 issues created and assigned"
+              echo "    4. Update compliance dashboard"
+              sleep 1
+              echo "       → Dashboard refreshed"
+              echo ""
+              echo "  This pattern allows Tool team to publish results"
+              echo "  that consuming teams process automatically."
+              ;;
+
+            scan-finished)
+              echo "  A security/compliance scan completed (source: ${SOURCE_TEAM})"
+              echo ""
+              echo "  Downstream actions:"
+              echo "    1. Retrieve scan report"
+              sleep 1
+              echo "       → Report downloaded"
+              echo "    2. Check against policy thresholds"
+              sleep 1
+              echo "       → All thresholds met (PASS)"
+              echo "    3. Update security posture score"
+              sleep 1
+              echo "       → Score: 94/100 (previous: 91/100)"
+              echo "    4. Notify compliance team"
+              sleep 1
+              echo "       → Notification sent to #compliance"
+              ;;
+
+          esac
+
+          echo ""
+          echo "Event processing complete"
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Notify Stakeholders
+  # Sends notifications about the processed event.
+  # In production, this would integrate with Slack, Teams, or email.
+  # ---------------------------------------------------------------------------
+  notify:
+    name: "Notify Stakeholders"
+    runs-on: [self-hosted, linux]
+    needs: [receive-event, process-event]
+
+    steps:
+      - name: Send notifications
+        run: |
+          EVENT_TYPE="${{ needs.receive-event.outputs.event_type }}"
+          SOURCE_TEAM="${{ needs.receive-event.outputs.source_team }}"
+
+          echo "============================================"
+          echo "  Notification Dispatch"
+          echo "============================================"
+          echo ""
+          echo "  Simulating notification to relevant channels:"
+          echo ""
+          echo "  [Slack]  #cross-team-events"
+          echo "    → '${SOURCE_TEAM}' triggered '${EVENT_TYPE}' — processed successfully"
+          echo ""
+          echo "  [Teams]  Platform Engineering"
+          echo "    → Event pipeline completed for ${EVENT_TYPE}"
+          echo ""
+          echo "  [Email]  platform-oncall@company.internal"
+          echo "    → Cross-team event summary attached"
+          echo ""
+          echo "  In production, use:"
+          echo "    • Slack: incoming webhooks or Slack API"
+          echo "    • Teams: Power Automate / Teams webhook"
+          echo "    • PagerDuty: Events API for critical alerts"
+
+      - name: Generate integration summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          # Cross-Team Integration Report
+
+          **Event type:** \`${{ needs.receive-event.outputs.event_type }}\`
+          **Source team:** \`${{ needs.receive-event.outputs.source_team }}\`
+          **Triggered by:** @${{ github.actor }}
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          ---
+
+          ## How This Works
+
+          \`\`\`
+          Team A (${SOURCE_TEAM})          This Repository
+          ┌──────────────────┐          ┌──────────────────┐
+          │ Tool/Model/Scan  │          │ 18 - Cross-Team  │
+          │ completes        │──event──▶│ Integration      │
+          │                  │          │                  │
+          └──────────────────┘          │ • Validate event │
+                                        │ • Process data   │
+                                        │ • Notify teams   │
+                                        │ • Trigger next   │
+                                        └──────────────────┘
+          \`\`\`
+
+          ## Triggering This Workflow
+
+          From another workflow or CLI:
+          \`\`\`bash
+          gh api repos/OWNER/REPO/dispatches \\
+            -f event_type="model-updated" \\
+            -f client_payload='{"team":"ml-platform","model":"fraud-detect-v3"}'
+          \`\`\`
+
+          Or use the helper script: \`scripts/send-dispatch.sh\`
+
+          ## Patterns Demonstrated
+
+          - **\`repository_dispatch\`** — Cross-repo event trigger
+          - **Typed events** — \`tool-completed\`, \`model-updated\`, \`scan-finished\`
+          - **Structured payloads** — \`client_payload\` carries data between teams
+          - **Bridge between silos** — No shared infra needed, just an API call
+          - **Inner-source integration** — Any team can send events; consuming team controls the reaction
+
+          ## OneFlow Connection
+
+          \`repository_dispatch\` lets internal tools integrate with pipelines
+          without modifying the pipeline. A security scanner, AI model registry,
+          or compliance tool sends an event — the pipeline reacts automatically.
+          EOF

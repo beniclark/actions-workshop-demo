@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A GitHub Actions workshop demo repo (4 modules, 15 workflows) with a sample Python Flask API. Workflows are **teaching material**, not production CI/CD. See [README.md](../README.md) for orientation and [docs/presenter-guide.md](../docs/presenter-guide.md) for facilitation details.
+A GitHub Actions workshop demo repo (5 modules, 19 workflows) with a sample Python Flask API. Workflows are **teaching material**, not production CI/CD. See [README.md](../README.md) for orientation and [docs/presenter-guide.md](../docs/presenter-guide.md) for facilitation details.
 
 ## Critical Constraints
 
@@ -10,7 +10,7 @@ A GitHub Actions workshop demo repo (4 modules, 15 workflows) with a sample Pyth
 - **Dual-placement pattern** — runnable workflows live in `.github/workflows/`. Each module folder (`01-fundamentals/`, etc.) has a `workflows/` subdirectory with **identical reference copies**. When editing a workflow, **update both locations**.
 - **OneFlow framing** — Visa's internal pipeline standard. Workflows are positioned as "building blocks of OneFlow." Preserve this framing in all content.
 - **Keep the app simple** — `app.py` is intentionally minimal (in-memory CRUD + health check). Don't add databases, auth, or complexity — it exists to give workflows something to build/test/deploy.
-- **Scripts are mock** — `scripts/deploy.sh` and `scripts/smoke-test.sh` simulate with echo/sleep. They don't touch real infrastructure.
+- **Scripts are mock** — `scripts/deploy.sh`, `scripts/smoke-test.sh`, `scripts/mock-ai-service.sh`, and `scripts/send-dispatch.sh` simulate with echo/sleep. They don't touch real infrastructure.
 
 ## Build and Test
 
@@ -25,9 +25,10 @@ black --check .                   # Format check
 
 ## Architecture
 
-- **Workflow numbering**: 01-03 (Fundamentals), 04-06 (E2E Pipeline), 07-11 (Reusable Workflows), 12-15 (Enterprise Patterns). Preserve this scheme.
+- **Workflow numbering**: 01-03 (Fundamentals), 04-06 (CI/CD Overview), 07-11 (Reusable Workflows), 12-15 (Enterprise Governance), 16-19 (Beyond CI/CD). Preserve this scheme.
 - **Reusable workflows**: 07/08/09 use `workflow_call`; 10 is the caller that composes them.
-- **Composite action**: `.github/actions/setup-python-project/action.yml` bundles checkout + Python setup + pip install.
+- **Event-driven workflows**: 16-19 use non-CI triggers (`issues`, `schedule`, `repository_dispatch`, `pull_request`).
+- **Composite actions**: `.github/actions/setup-python-project/action.yml` bundles checkout + Python setup + pip install. `.github/actions/internal-tool-wrapper/action.yml` wraps an internal tool (inner-source pattern).
 - **Environments**: `dev`, `staging`, `production` — production requires reviewers. Config in `config/{dev,staging,prod}.env`.
 - **CODEOWNERS**: `@platform-team` owns workflows/actions; `@security-team` co-owns Dockerfile.
 

@@ -11,14 +11,15 @@
 | Time | Module | Duration | Focus |
 |------|--------|----------|-------|
 | 0:00 | Welcome & Setup | 10 min | Introductions, verify repo access, runner status |
-| 0:10 | Module 1: Fundamentals | 45 min | Triggers, runners, secrets, environments |
-| 0:55 | Break | 10 min | |
-| 1:05 | Module 2: E2E Pipeline | 60 min | Full CI/CD pipeline, integration testing |
-| 2:05 | Break | 10 min | |
-| 2:15 | Module 3: Reusable Workflows | 45 min | workflow_call, composition, governance |
-| 3:00 | Break | 10 min | |
-| 3:10 | Module 4: Enterprise Patterns | 60 min | Promotion, matrix, separation of concerns, guardrails |
-| 4:10 | Wrap-Up & OneFlow Discussion | 20 min | OneFlow enhancement ideas, Q&A |
+| 0:10 | Module 1: Fundamentals | 30 min | Triggers, runners, secrets, environments |
+| 0:40 | Module 2: CI/CD Overview | 30 min | Full CI/CD pipeline (OneFlow-framed) |
+| 1:10 | Break | 10 min | |
+| 1:20 | Module 3: Beyond CI/CD | 60 min | Event-driven, scheduled, cross-team, AI tools |
+| 2:20 | Break | 10 min | |
+| 2:30 | Module 4: Inner-Source & Reusable Workflows | 45 min | workflow_call, custom actions, composition |
+| 3:15 | Break | 10 min | |
+| 3:25 | Module 5: Enterprise Governance | 30 min | Separation of concerns, guardrails |
+| 3:55 | Wrap-Up & OneFlow Discussion | 20 min | OneFlow enhancement ideas, Q&A |
 
 ---
 
@@ -53,37 +54,63 @@ Run through this checklist 30 minutes before the workshop:
 
 ## Module Delivery Guide
 
-### Module 1: Fundamentals (45 min)
+### Module 1: Fundamentals (30 min)
 
-**Opening:** "Let's start with the building blocks. Even if you've used Actions before, we'll cover patterns specific to self-hosted runners and enterprise secret management."
+**Opening:** "Let's start with the building blocks. Even if you've used Actions before, we'll cover patterns specific to self-hosted runners and enterprise secret management. This is a refresher — we'll move quickly so we can focus on the non-CI capabilities."
 
 **Demo order:**
 1. `01-basic-ci.yml` — Walk through syntax, trigger it, show the UI
 2. `02-self-hosted-runner.yml` — Runner labels, container jobs, diagnostics
-3. `03-secrets-environments.yml` — Env precedence, secret masking, full 3-tier deployment, OIDC
+3. `03-secrets-environments.yml` — Env precedence, secret masking, OIDC overview
+
+**Pacing note:** Keep this brisk. The audience already knows CI/CD — this is context-setting, not deep teaching. If the audience is advanced, spend 5 min here and move on.
 
 **OneFlow tie-in:** "OneFlow standardizes these patterns — runner selection, secret management, cleanup. Understanding them helps you debug and contribute."
 
 ---
 
-### Module 2: E2E Pipeline (60 min)
+### Module 2: CI/CD Overview (30 min)
 
-**Opening:** "Now let's see these pieces come together in a real deployment pipeline."
+**Opening:** "You already have OneFlow for CI/CD across 3,000+ repos. Rather than spend time on what you know, let's quickly see the underlying primitives — then move to the capabilities beyond CI/CD."
 
 **Demo order:**
-1. `04-ci-build-test.yml` — CI with lint, parallel tests, Docker build
-2. `05-cd-deploy.yml` — Multi-environment CD with progressive gates
-3. `06-full-pipeline.yml` — Combined CI/CD in one workflow
+1. `04-ci-build-test.yml` — CI with lint, parallel tests (quick walkthrough)
+2. `06-full-pipeline.yml` — Combined CI/CD in one workflow (show but don't deep-dive)
+3. Brief mention of `05-cd-deploy.yml` — Multi-environment CD concept
 
-**OneFlow tie-in:** "This is what OneFlow gives you out of the box. Understanding the primitives means you can propose enhancements."
+**Pacing note:** This is a 30-min overview, not a deep dive. The audience has OneFlow — they don't need to build CI/CD from scratch. Show the patterns, connect to OneFlow, then move to Module 3 where the new content lives.
 
-**Key moment:** When showing the approval gate on production deployment, pause and discuss: "This is where governance meets automation. OneFlow can enforce this consistently."
+**OneFlow tie-in:** "This is what OneFlow gives you out of the box. The next module shows what Actions can do *beyond* what OneFlow covers."
+
+**Key moment:** When showing the full pipeline, say: "OneFlow handles all of this. Now let's look at what else Actions can do."
 
 ---
 
-### Module 3: Reusable Workflows (45 min)
+### Module 3: Beyond CI/CD (60 min) ⭐ Core Module
 
-**Opening:** "Module 2 showed a complete pipeline in one file. Now let's see how to break it into reusable, composable pieces — this is how OneFlow actually works."
+**Opening:** "This is the heart of today's workshop. Actions is an event platform — not just CI/CD. We're going to look at four workflows that solve real problems you can't solve with a build pipeline: issue triage, scheduled operations, cross-team integration, and internal AI tool automation."
+
+**Demo order:**
+1. `16-issue-triage.yml` (~15 min) — Event-driven issue classification and routing
+2. `17-scheduled-ops.yml` (~10 min) — Cron-driven repo health checks and dependency audits
+3. `18-cross-team-integration.yml` (~15 min) — `repository_dispatch` bridging team silos
+4. `19-ai-tool-integration.yml` (~20 min) — Internal AI service + composite action pattern
+
+**Key transitions:**
+- After 16: "We just automated something that was manual email/Slack work. No CI involved."
+- After 17: "This runs every Monday by itself. What manual tasks does your team do weekly?"
+- After 18: "This is how you bridge silo'd teams without meetings. Team A sends an event, Team B reacts."
+- After 19: "This is the full pattern: an AI tool built by one team, wrapped as an action, available to all 3,000 repos."
+
+**OneFlow tie-in:** "These patterns complement OneFlow. `repository_dispatch` lets internal tools integrate with pipelines without modifying OneFlow itself. Custom composite actions become shared building blocks that any team's pipeline can consume."
+
+**Key moment (workflow 19):** Walk through the composite action anatomy in `.github/actions/internal-tool-wrapper/`. "One team builds this, publishes it. Every other team gets it with a single `uses:` line. No Security Assessment needed — it's internal."
+
+---
+
+### Module 4: Inner-Source & Reusable Workflows (45 min)
+
+**Opening:** "In Module 3 we built a composite action from scratch. Now let's see the full reusable workflow pattern — how OneFlow actually works under the hood, and how you can contribute your own reusable pieces."
 
 **Demo order:**
 1. `07-reusable-build.yml` — Show the workflow_call contract
@@ -94,17 +121,20 @@ Run through this checklist 30 minutes before the workshop:
 
 **Key moment:** When showing `10-caller-orchestrator.yml`, compare its size to the full pipeline in Module 2. "Same pipeline, fraction of the code."
 
+**Inner-source tie-in:** "This is the inner-source contribution model. You build a reusable workflow, publish it, and every team benefits. The composite action from Module 3 is the same pattern at a smaller scale."
+
 ---
 
-### Module 4: Enterprise Patterns (60 min)
+### Module 5: Enterprise Governance (30 min)
 
-**Opening:** "The last module covers patterns for operating at scale — the architectural decisions and guardrails that matter when hundreds of teams share infrastructure."
+**Opening:** "The last module covers enterprise-scale governance — the architectural decisions and guardrails that matter when hundreds of teams share infrastructure."
 
 **Demo order:**
-1. `12-environment-promotion.yml` — Manual promotion with approval
-2. `13-matrix-multi-service.yml` — Dynamic matrix, fan-out/fan-in
-3. `14-separation-of-concerns.yml` — Team ownership model (strong OneFlow tie-in)
-4. `15-pipeline-guardrails.yml` — 7 guardrails for deployment security
+1. `12-environment-promotion.yml` — Manual promotion with approval (brief)
+2. `14-separation-of-concerns.yml` — Team ownership model (strong OneFlow tie-in)
+3. `15-pipeline-guardrails.yml` — 7 guardrails for deployment security
+
+**Pacing note:** Workflow 13 (matrix multi-service) is available for reference but can be skipped in the interest of time. Mention it as "available for self-study."
 
 **Key moment (workflow 14):** "This is the OneFlow model — centralized stages, distributed consumption." Let it sink in.
 
@@ -117,10 +147,11 @@ Run through this checklist 30 minutes before the workshop:
 **Reference:** `docs/oneflow-learning-opportunities.md`
 
 **Facilitation approach:**
-1. Recap the 4 modules in 2 minutes
+1. Recap the 5 modules in 2 minutes — emphasize the non-CI capabilities from Module 3
 2. Open the OneFlow learning opportunities doc on screen
 3. Walk through 3-4 enhancement areas, asking for input
-4. Close with: "OneFlow is an inner-source project. These ideas can become pull requests."
+4. Highlight: "The event-driven patterns from Module 3 and the inner-source actions from Module 4 are things you can start building tomorrow."
+5. Close with: "OneFlow is an inner-source project. These ideas can become pull requests. And the non-CI automation doesn't need OneFlow at all — any team can adopt it today."
 
 ---
 

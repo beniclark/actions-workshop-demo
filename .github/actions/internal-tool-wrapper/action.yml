@@ -1,0 +1,171 @@
+# =============================================================================
+# Composite Action: Internal Tool Wrapper
+# =============================================================================
+# Demonstrates the inner-source pattern for wrapping internal CLI tools
+# as reusable GitHub Actions:
+#
+# - A platform/tools team builds and maintains the action
+# - Application teams consume it with a simple `uses:` line
+# - No third-party Security Assessment needed (it's an internal action)
+# - Tool version, configuration, and best practices are centralized
+#
+# This pattern is key for Visa's scenario: different teams building AI tools
+# and other internal utilities can publish them as composite actions in
+# the organization, making them instantly available to all 3000+ repos.
+#
+# Usage:
+#   - uses: ./.github/actions/internal-tool-wrapper
+#     with:
+#       tool-command: "analyze --format json"
+#       config-file: "setup.cfg"
+#       fail-on-error: "true"
+#
+# OneFlow tie-in: Internal composite actions become shared building blocks.
+# Any team's OneFlow pipeline gains the capability by adding one `uses:` line.
+# =============================================================================
+
+name: "Internal Tool Wrapper"
+description: "Wraps an internal CLI tool as a reusable composite action"
+
+# -----------------------------------------------------------------------------
+# Inputs — the interface that consuming teams interact with
+# -----------------------------------------------------------------------------
+inputs:
+  tool-command:
+    description: "Command to pass to the internal tool"
+    required: true
+    default: "analyze"
+  config-file:
+    description: "Path to the tool configuration file"
+    required: false
+    default: ""
+  fail-on-error:
+    description: "Whether to fail the workflow if the tool finds issues"
+    required: false
+    default: "true"
+
+# -----------------------------------------------------------------------------
+# Outputs — structured results for downstream steps
+# -----------------------------------------------------------------------------
+outputs:
+  result:
+    description: "Tool execution result (pass/fail)"
+    value: ${{ steps.run-tool.outputs.result }}
+  findings:
+    description: "Number of findings"
+    value: ${{ steps.run-tool.outputs.findings }}
+  report-path:
+    description: "Path to the generated report"
+    value: ${{ steps.run-tool.outputs.report_path }}
+
+runs:
+  using: "composite"
+  steps:
+    # Step 1: Validate inputs and environment
+    - name: Validate configuration
+      shell: bash
+      run: |
+        echo "============================================"
+        echo "  Internal Tool Wrapper v1.0"
+        echo "============================================"
+        echo ""
+        echo "  Command:      ${{ inputs.tool-command }}"
+        echo "  Config:       ${{ inputs.config-file || '(default)' }}"
+        echo "  Fail on error: ${{ inputs.fail-on-error }}"
+        echo ""
+
+        # Validate config file exists if specified
+        if [ -n "${{ inputs.config-file }}" ]; then
+          if [ ! -f "${{ inputs.config-file }}" ]; then
+            echo "::warning::Config file '${{ inputs.config-file }}' not found, using defaults"
+          else
+            echo "  Config file found: ${{ inputs.config-file }}"
+          fi
+        fi
+
+    # Step 2: Simulate tool installation (in production, download from internal registry)
+    - name: Ensure tool is available
+      shell: bash
+      run: |
+        echo "Checking for internal tool..."
+        echo ""
+        echo "  In production, this step would:"
+        echo "  1. Check if the tool is already cached"
+        echo "  2. Download from internal artifact registry if needed"
+        echo "  3. Verify checksum for integrity"
+        echo "  4. Add to PATH"
+        echo ""
+        echo "  Example:"
+        echo "    curl -sf https://artifacts.internal.company.com/tools/analyzer/v2.1.0/linux-amd64 -o /usr/local/bin/analyzer"
+        echo "    chmod +x /usr/local/bin/analyzer"
+        echo ""
+        echo "  Tool ready (simulated)"
+
+    # Step 3: Run the tool
+    - name: Execute tool
+      id: run-tool
+      shell: bash
+      run: |
+        echo "Running: internal-tool ${{ inputs.tool-command }}"
+        echo ""
+
+        # Simulate tool execution with configurable output
+        CONFIG_FLAG=""
+        if [ -n "${{ inputs.config-file }}" ] && [ -f "${{ inputs.config-file }}" ]; then
+          CONFIG_FLAG="--config ${{ inputs.config-file }}"
+          echo "  Using config: ${{ inputs.config-file }}"
+        fi
+
+        echo "  Scanning repository..."
+        echo "  Analyzing code patterns..."
+        echo "  Checking against internal standards..."
+        echo ""
+
+        # Generate simulated findings
+        FINDINGS=2
+        RESULT="pass"
+
+        echo "  Results:"
+        echo "    ├── Code standards: compliant"
+        echo "    ├── Naming conventions: 1 warning"
+        echo "    ├── Error handling: 1 suggestion"
+        echo "    └── Overall: PASS"
+        echo ""
+
+        # Write report
+        REPORT_PATH="/tmp/tool-report-${GITHUB_RUN_ID}.json"
+        cat > "$REPORT_PATH" << REPORT_EOF
+        {
+          "tool": "internal-analyzer",
+          "version": "2.1.0",
+          "command": "${{ inputs.tool-command }}",
+          "repository": "${GITHUB_REPOSITORY}",
+          "sha": "${GITHUB_SHA}",
+          "findings": ${FINDINGS},
+          "result": "${RESULT}",
+          "details": [
+            {"severity": "warning", "rule": "naming-001", "message": "Variable name could be more descriptive", "file": "app.py", "line": 15},
+            {"severity": "info", "rule": "error-002", "message": "Consider adding specific exception handling", "file": "app.py", "line": 42}
+          ]
+        }
+        REPORT_EOF
+
+        echo "  Report written to: ${REPORT_PATH}"
+
+        # Set outputs
+        echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
+        echo "findings=${FINDINGS}" >> "$GITHUB_OUTPUT"
+        echo "report_path=${REPORT_PATH}" >> "$GITHUB_OUTPUT"
+
+    # Step 4: Handle failure mode
+    - name: Check failure threshold
+      shell: bash
+      if: inputs.fail-on-error == 'true'
+      run: |
+        RESULT="${{ steps.run-tool.outputs.result }}"
+        if [ "${RESULT}" = "fail" ]; then
+          echo "::error::Internal tool check failed. Set fail-on-error: false to continue anyway."
+          exit 1
+        else
+          echo "Tool check passed."
+        fi

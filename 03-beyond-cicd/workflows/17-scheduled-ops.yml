@@ -1,0 +1,341 @@
+# =============================================================================
+# Workshop: Scheduled Operations & Reporting
+# =============================================================================
+# This workflow demonstrates cron-driven automation for operational tasks:
+# - Scheduled repository health checks
+# - Dependency freshness reporting
+# - Stale issue detection and cleanup
+# - Dashboard generation via GITHUB_STEP_SUMMARY
+#
+# Key patterns:
+#   - schedule trigger (cron syntax)
+#   - Combining schedule with workflow_dispatch for manual runs
+#   - GitHub API queries for repository metadata
+#   - Generating operational dashboards in step summaries
+#
+# OneFlow tie-in: Operational automation runs alongside CI/CD pipelines.
+# Teams can schedule dependency audits, compliance checks, and health
+# reports that feed into OneFlow's governance model.
+# =============================================================================
+
+name: "17 - Scheduled Ops"
+
+# -----------------------------------------------------------------------------
+# Triggers
+# The schedule trigger runs on a cron schedule (UTC).
+# workflow_dispatch allows manual triggering for demos and ad-hoc runs.
+# -----------------------------------------------------------------------------
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: "0 9 * * 1"
+
+  workflow_dispatch:
+    inputs:
+      include_stale_check:
+        description: "Include stale issue analysis"
+        type: boolean
+        default: true
+      days_until_stale:
+        description: "Days before an issue is considered stale"
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+  issues: read
+
+env:
+  DAYS_STALE: ${{ inputs.days_until_stale || 30 }}
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Repository Health Check
+  # Validates that repo governance artifacts are in place.
+  # This is the kind of check a platform team would run across all repos.
+  # ---------------------------------------------------------------------------
+  repo-health:
+    name: "Repository Health Check"
+    runs-on: [self-hosted, linux]
+    outputs:
+      health_score: ${{ steps.check.outputs.score }}
+      findings: ${{ steps.check.outputs.findings }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run health checks
+        id: check
+        run: |
+          echo "============================================"
+          echo "  Repository Health Check"
+          echo "  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "============================================"
+          echo ""
+
+          SCORE=0
+          TOTAL=8
+          FINDINGS=""
+
+          # Check 1: README exists
+          if [ -f "README.md" ]; then
+            echo "  [PASS] README.md exists"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [FAIL] README.md missing"
+            FINDINGS="${FINDINGS}Missing README.md; "
+          fi
+
+          # Check 2: CODEOWNERS exists
+          if [ -f ".github/CODEOWNERS" ]; then
+            echo "  [PASS] CODEOWNERS exists"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [FAIL] CODEOWNERS missing"
+            FINDINGS="${FINDINGS}Missing CODEOWNERS; "
+          fi
+
+          # Check 3: License or security policy
+          if [ -f "LICENSE" ] || [ -f "SECURITY.md" ] || [ -f ".github/SECURITY.md" ]; then
+            echo "  [PASS] Security/license policy exists"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [WARN] No LICENSE or SECURITY.md found"
+            FINDINGS="${FINDINGS}Missing security policy; "
+          fi
+
+          # Check 4: CI workflow exists
+          if ls .github/workflows/*.yml 1>/dev/null 2>&1; then
+            WF_COUNT=$(ls .github/workflows/*.yml | wc -l)
+            echo "  [PASS] CI workflows found (${WF_COUNT} files)"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [FAIL] No workflow files found"
+            FINDINGS="${FINDINGS}No CI workflows; "
+          fi
+
+          # Check 5: Tests directory exists
+          if [ -d "tests" ]; then
+            TEST_COUNT=$(find tests -name "test_*.py" -o -name "*_test.py" | wc -l)
+            echo "  [PASS] Tests directory exists (${TEST_COUNT} test files)"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [WARN] No tests directory"
+            FINDINGS="${FINDINGS}No tests directory; "
+          fi
+
+          # Check 6: Dockerfile exists (containerized deployment)
+          if [ -f "Dockerfile" ]; then
+            echo "  [PASS] Dockerfile exists"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [INFO] No Dockerfile (not required)"
+            SCORE=$((SCORE + 1))
+          fi
+
+          # Check 7: Dependency file exists
+          if [ -f "requirements.txt" ] || [ -f "package.json" ] || [ -f "go.mod" ]; then
+            echo "  [PASS] Dependency manifest exists"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [WARN] No dependency manifest found"
+            FINDINGS="${FINDINGS}No dependency manifest; "
+          fi
+
+          # Check 8: .gitignore exists
+          if [ -f ".gitignore" ]; then
+            echo "  [PASS] .gitignore exists"
+            SCORE=$((SCORE + 1))
+          else
+            echo "  [WARN] No .gitignore"
+            FINDINGS="${FINDINGS}Missing .gitignore; "
+          fi
+
+          echo ""
+          echo "  Health Score: ${SCORE}/${TOTAL}"
+          echo ""
+
+          if [ -z "$FINDINGS" ]; then
+            FINDINGS="No issues found"
+          fi
+
+          echo "score=${SCORE}/${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "findings=${FINDINGS}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Dependency Freshness
+  # Checks for outdated dependencies. In production, this could use
+  # Dependabot data, pip-audit, or an internal dependency tracking service.
+  # ---------------------------------------------------------------------------
+  dependency-freshness:
+    name: "Dependency Freshness Report"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check dependency freshness
+        run: |
+          echo "============================================"
+          echo "  Dependency Freshness Report"
+          echo "============================================"
+          echo ""
+
+          if [ -f "requirements.txt" ]; then
+            echo "Installing current dependencies..."
+            pip install -r requirements.txt --quiet 2>/dev/null
+
+            echo ""
+            echo "--- Installed Package Versions ---"
+            pip list --format=columns 2>/dev/null | head -20
+
+            echo ""
+            echo "--- Checking for Outdated Packages ---"
+            OUTDATED=$(pip list --outdated --format=columns 2>/dev/null || true)
+
+            if [ -n "$OUTDATED" ]; then
+              echo "$OUTDATED"
+              OUTDATED_COUNT=$(echo "$OUTDATED" | tail -n +3 | wc -l)
+              echo ""
+              echo "Found ${OUTDATED_COUNT} outdated package(s)"
+            else
+              echo "All packages are up to date!"
+            fi
+          else
+            echo "No requirements.txt found — skipping"
+          fi
+
+          echo ""
+          echo "--- Recommendations ---"
+          echo "  • Review outdated packages for security patches"
+          echo "  • Pin major versions to avoid breaking changes"
+          echo "  • Use Dependabot or Renovate for automated updates"
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Stale Issue Report
+  # Identifies issues that haven't been updated recently.
+  # Demonstrates using the GitHub API within scheduled workflows.
+  # ---------------------------------------------------------------------------
+  stale-issues:
+    name: "Stale Issue Analysis"
+    runs-on: [self-hosted, linux]
+    if: github.event.inputs.include_stale_check != 'false'
+
+    steps:
+      - name: Analyze stale issues
+        run: |
+          echo "============================================"
+          echo "  Stale Issue Analysis"
+          echo "  Threshold: ${{ env.DAYS_STALE }} days"
+          echo "============================================"
+          echo ""
+
+          # In production, this would query the GitHub API:
+          #   gh issue list --state open --json number,title,updatedAt
+          # For the demo, we simulate the analysis
+
+          echo "Querying open issues..."
+          echo ""
+          echo "--- Simulated Results ---"
+          echo ""
+          echo "  Open issues: 12"
+          echo "  Updated in last 7 days: 5"
+          echo "  Updated in last 30 days: 3"
+          echo "  Stale (>${{ env.DAYS_STALE }} days): 4"
+          echo ""
+          echo "  Stale Issues:"
+          echo "    #42  'Update docs for v2 API'          — 45 days ago"
+          echo "    #38  'Add retry logic to worker'       — 52 days ago"
+          echo "    #31  'Investigate memory leak in prod'  — 67 days ago"
+          echo "    #28  'Support custom themes'            — 91 days ago"
+          echo ""
+          echo "  Actions available:"
+          echo "    • Add 'stale' label to notify assignees"
+          echo "    • Post reminder comment with inactivity warning"
+          echo "    • Auto-close after additional grace period"
+          echo ""
+          echo "  In production, use the 'actions/stale' action or"
+          echo "  call the GitHub API to label/comment/close automatically."
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Generate Dashboard
+  # Combines all reports into a single GITHUB_STEP_SUMMARY dashboard.
+  # ---------------------------------------------------------------------------
+  summary-dashboard:
+    name: "Operations Dashboard"
+    runs-on: [self-hosted, linux]
+    needs: [repo-health, dependency-freshness, stale-issues]
+    if: always()
+
+    steps:
+      - name: Generate operations dashboard
+        run: |
+          HEALTH_SCORE="${{ needs.repo-health.outputs.health_score }}"
+          HEALTH_FINDINGS="${{ needs.repo-health.outputs.findings }}"
+
+          cat >> "$GITHUB_STEP_SUMMARY" << 'HEADER'
+          # Weekly Operations Dashboard
+
+          HEADER
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          **Report Date:** $(date -u +"%B %d, %Y")
+          **Triggered by:** \`${{ github.event_name }}\`
+          **Repository:** \`${{ github.repository }}\`
+
+          ---
+
+          ## Repository Health
+
+          **Score:** ${HEALTH_SCORE}
+          **Findings:** ${HEALTH_FINDINGS}
+
+          ## Dependency Status
+
+          | Metric | Value |
+          |--------|-------|
+          | Total packages | ~10 |
+          | Up to date | ~8 |
+          | Outdated | ~2 |
+          | Security advisories | 0 |
+
+          ## Issue Health
+
+          | Metric | Value |
+          |--------|-------|
+          | Open issues | 12 |
+          | Active (last 7 days) | 5 |
+          | Stale (>30 days) | 4 |
+          | Needs triage | 3 |
+
+          ---
+
+          ## Patterns Demonstrated
+
+          - **\`schedule\` trigger** — Cron-based automation (every Monday 9 AM UTC)
+          - **Combined triggers** — \`schedule\` + \`workflow_dispatch\` for manual runs
+          - **Repository auditing** — Governance checks without CI/CD
+          - **Dependency monitoring** — Freshness reports for security hygiene
+          - **Stale issue management** — Automated cleanup of inactive issues
+          - **Dashboard generation** — \`GITHUB_STEP_SUMMARY\` as a reporting surface
+
+          ## OneFlow Connection
+
+          Scheduled workflows complement CI/CD pipelines. Platform teams can publish
+          scheduled governance checks that run across all repositories:
+          - Weekly dependency audit
+          - Monthly compliance report
+          - Daily stale-issue cleanup
+          EOF
+
+          echo "Dashboard written to GITHUB_STEP_SUMMARY"

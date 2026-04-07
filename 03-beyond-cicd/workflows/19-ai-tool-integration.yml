@@ -1,0 +1,276 @@
+# =============================================================================
+# Workshop: Internal AI Tool Integration
+# =============================================================================
+# This workflow demonstrates using Actions as glue between internal tools:
+# - Calling an internal AI-powered code review service
+# - Processing structured results from internal APIs
+# - Posting findings back to PRs
+# - Using a custom composite action to wrap an internal tool
+#
+# Key patterns:
+#   - Actions as integration layer for internal tools
+#   - Custom composite action consumption (internal-tool-wrapper)
+#   - PR-triggered automation that calls internal services
+#   - Structured output parsing and reporting
+#
+# This directly addresses the customer scenario:
+#   "We have a ton of AI tools being developed by different teams
+#    that may be relatively silo'd... showcase how Actions could
+#    bridge that gap."
+#
+# OneFlow tie-in: Internal tools can be wrapped as custom actions
+# and published to the org. Any team's OneFlow pipeline can then
+# integrate the tool with a single `uses:` line — no Security
+# Assessment needed because it's an internal action.
+# =============================================================================
+
+name: "19 - AI Tool Integration"
+
+# -----------------------------------------------------------------------------
+# Triggers
+# PR-triggered to show AI review on code changes.
+# workflow_dispatch for demo purposes with configurable inputs.
+# -----------------------------------------------------------------------------
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+  workflow_dispatch:
+    inputs:
+      review_scope:
+        description: "What to review"
+        type: choice
+        options:
+          - full
+          - security-only
+          - style-only
+        default: full
+      model_endpoint:
+        description: "Internal AI service endpoint (simulated)"
+        type: string
+        default: "https://ai-review.internal.company.com/v2/analyze"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  AI_SERVICE_URL: ${{ inputs.model_endpoint || 'https://ai-review.internal.company.com/v2/analyze' }}
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Call Internal AI Service
+  # Demonstrates calling an internal API from a workflow.
+  # Uses the mock-ai-service.sh script to simulate the API response.
+  # In production, this would be a curl/wget call to the real service.
+  # ---------------------------------------------------------------------------
+  ai-review:
+    name: "AI Code Review"
+    runs-on: [self-hosted, linux]
+    outputs:
+      findings_count: ${{ steps.call-service.outputs.findings_count }}
+      critical_count: ${{ steps.call-service.outputs.critical }}
+      pass: ${{ steps.call-service.outputs.pass }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine review scope
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # In a real workflow, we'd get the list of changed files
+            SCOPE="full"
+            FILES_CHANGED="5"
+            echo "Reviewing PR #${{ github.event.pull_request.number }}"
+          else
+            SCOPE="${{ github.event.inputs.review_scope }}"
+            FILES_CHANGED="10"
+            echo "Manual review (scope: ${SCOPE})"
+          fi
+
+          echo "scope=${SCOPE}" >> "$GITHUB_OUTPUT"
+          echo "files=${FILES_CHANGED}" >> "$GITHUB_OUTPUT"
+
+      - name: Call internal AI service
+        id: call-service
+        run: |
+          echo "============================================"
+          echo "  Calling Internal AI Review Service"
+          echo "============================================"
+          echo ""
+          echo "  Endpoint: ${{ env.AI_SERVICE_URL }}"
+          echo "  Scope:    ${{ steps.scope.outputs.scope }}"
+          echo "  Files:    ${{ steps.scope.outputs.files }}"
+          echo ""
+
+          # In production, this would be:
+          #   curl -sf -X POST "${{ env.AI_SERVICE_URL }}" \
+          #     -H "Authorization: Bearer ${{ secrets.AI_SERVICE_TOKEN }}" \
+          #     -H "Content-Type: application/json" \
+          #     -d '{"repo":"${{ github.repository }}","sha":"${{ github.sha }}","scope":"full"}'
+
+          # For the demo, we use the mock script
+          chmod +x scripts/mock-ai-service.sh
+          OUTPUT=$(bash scripts/mock-ai-service.sh \
+            "${{ steps.scope.outputs.scope }}" \
+            "${{ steps.scope.outputs.files }}")
+
+          echo "$OUTPUT"
+
+          # Parse structured output
+          FINDINGS=$(echo "$OUTPUT" | sed -n '/---STRUCTURED_OUTPUT---/,$ p' | tail -n +2)
+          FINDINGS_COUNT=$(echo "$FINDINGS" | grep -o '"findings_count": [0-9]*' | grep -o '[0-9]*')
+          CRITICAL=$(echo "$FINDINGS" | grep -o '"critical": [0-9]*' | grep -o '[0-9]*')
+          PASS=$(echo "$FINDINGS" | grep -o '"pass": [a-z]*' | grep -o '[a-z]*$')
+
+          echo ""
+          echo "Parsed results:"
+          echo "  Findings: ${FINDINGS_COUNT:-0}"
+          echo "  Critical: ${CRITICAL:-0}"
+          echo "  Pass:     ${PASS:-true}"
+
+          echo "findings_count=${FINDINGS_COUNT:-0}" >> "$GITHUB_OUTPUT"
+          echo "critical=${CRITICAL:-0}" >> "$GITHUB_OUTPUT"
+          echo "pass=${PASS:-true}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Use Custom Composite Action
+  # Demonstrates consuming the internal-tool-wrapper action.
+  # This is the inner-source pattern: one team builds an action,
+  # other teams consume it with a single `uses:` line.
+  # ---------------------------------------------------------------------------
+  internal-tool-check:
+    name: "Internal Tool Check"
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run internal tool via composite action
+        uses: ./.github/actions/internal-tool-wrapper
+        with:
+          tool-command: "analyze --format json"
+          config-file: "setup.cfg"
+          fail-on-error: "false"
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Report Results
+  # Combines AI review and tool results into a PR comment and summary.
+  # Demonstrates using GITHUB_STEP_SUMMARY and GitHub API for PR comments.
+  # ---------------------------------------------------------------------------
+  report:
+    name: "Report Results"
+    runs-on: [self-hosted, linux]
+    needs: [ai-review, internal-tool-check]
+    if: always()
+
+    steps:
+      - name: Generate review report
+        run: |
+          FINDINGS="${{ needs.ai-review.outputs.findings_count }}"
+          CRITICAL="${{ needs.ai-review.outputs.critical_count }}"
+          PASS="${{ needs.ai-review.outputs.pass }}"
+
+          echo "============================================"
+          echo "  AI Review Report"
+          echo "============================================"
+          echo ""
+          echo "  Total findings: ${FINDINGS}"
+          echo "  Critical:       ${CRITICAL}"
+          echo "  Status:         $([ "${PASS}" = "true" ] && echo "PASSED" || echo "FAILED")"
+          echo ""
+
+          if [ "${PASS}" = "true" ]; then
+            echo "  ✓ AI review passed — no blocking issues found"
+          else
+            echo "  ✗ AI review failed — critical issues require attention"
+          fi
+
+      - name: Post PR comment (simulated)
+        run: |
+          FINDINGS="${{ needs.ai-review.outputs.findings_count }}"
+          CRITICAL="${{ needs.ai-review.outputs.critical_count }}"
+
+          echo "============================================"
+          echo "  PR Comment (simulated)"
+          echo "============================================"
+          echo ""
+          echo "  In production, this step would post to the PR:"
+          echo ""
+          echo "  gh pr comment ${{ github.event.pull_request.number || 'N/A' }} --body ..."
+          echo ""
+          echo "  Comment content:"
+          echo "  ───────────────────────────────────────"
+          echo "  ## AI Code Review Results"
+          echo ""
+          echo "  | Metric | Value |"
+          echo "  |--------|-------|"
+          echo "  | Findings | ${FINDINGS} |"
+          echo "  | Critical | ${CRITICAL} |"
+          echo "  | Status | Passed |"
+          echo ""
+          echo "  *Review performed by internal-codereview-v3*"
+          echo "  ───────────────────────────────────────"
+
+      - name: Generate summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          # AI Tool Integration Report
+
+          **AI Service:** \`${{ env.AI_SERVICE_URL }}\`
+          **Scope:** \`${{ github.event.inputs.review_scope || 'full' }}\`
+          **Findings:** ${{ needs.ai-review.outputs.findings_count }} (${{ needs.ai-review.outputs.critical_count }} critical)
+          **Status:** $([ "${{ needs.ai-review.outputs.pass }}" = "true" ] && echo "Passed" || echo "Failed")
+
+          ---
+
+          ## Architecture
+
+          \`\`\`
+          Pull Request
+              │
+              ▼
+          ┌──────────────────────────────┐
+          │ 19 - AI Tool Integration     │
+          │                              │
+          │  ┌────────────────────────┐  │
+          │  │ Job 1: Call AI Service │  │  ← Internal API call
+          │  └────────────────────────┘  │
+          │  ┌────────────────────────┐  │
+          │  │ Job 2: Composite Action│  │  ← Inner-source action
+          │  └────────────────────────┘  │
+          │  ┌────────────────────────┐  │
+          │  │ Job 3: Report Results  │  │  ← PR comment + summary
+          │  └────────────────────────┘  │
+          └──────────────────────────────┘
+          \`\`\`
+
+          ## Patterns Demonstrated
+
+          - **Internal API integration** — Calling an AI service owned by another team
+          - **Custom composite action** — \`internal-tool-wrapper\` wraps an internal CLI tool
+          - **Inner-source consumption** — One team builds the action, other teams use it
+          - **No third-party actions needed** — Everything is internal, bypasses Security Assessment
+          - **PR-driven automation** — AI review runs automatically on every pull request
+          - **Structured output parsing** — Machine-readable results from internal services
+
+          ## Why This Matters for Visa
+
+          > "We have AI tools being developed by different teams that may be silo'd...
+          > Actions could bridge that gap."
+
+          This workflow shows exactly that pattern:
+          1. **ML Team** builds and hosts the AI code review service
+          2. **Platform Team** wraps it as a composite action (\`internal-tool-wrapper\`)
+          3. **Any App Team** uses it with one line: \`uses: ./.github/actions/internal-tool-wrapper\`
+          4. **No Security Assessment** needed — it's an internal action, not third-party
+          EOF

@@ -1,0 +1,288 @@
+# =============================================================================
+# Workshop: Issue Triage Automation
+# =============================================================================
+# This workflow demonstrates event-driven automation beyond CI/CD:
+# - Reacting to issue events (opened, labeled, commented)
+# - Auto-labeling based on issue content analysis
+# - Routing issues to the right team
+# - Posting templated welcome comments
+#
+# Key patterns:
+#   - Event-driven triggers (issues, issue_comment)
+#   - Conditional logic based on event payload
+#   - GitHub API interaction from workflows
+#   - Content analysis with shell scripting
+#
+# OneFlow tie-in: These patterns can automate operational workflows
+# that complement CI/CD — intake triage, change requests, incident
+# response. OneFlow teams can publish reusable triage workflows that
+# other teams consume.
+# =============================================================================
+
+name: "16 - Issue Triage"
+
+# -----------------------------------------------------------------------------
+# Triggers — Event-driven, not CI-driven
+# These fire automatically when issues are created or commented on.
+# No push or pull_request triggers — this is operational automation.
+# -----------------------------------------------------------------------------
+on:
+  issues:
+    types: [opened, labeled]
+
+  issue_comment:
+    types: [created]
+
+  # Manual trigger for demo purposes
+  workflow_dispatch:
+    inputs:
+      demo_mode:
+        description: "Run in demo mode (simulates issue events)"
+        type: boolean
+        default: true
+
+permissions:
+  issues: write
+  contents: read
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Auto-Label
+  # Analyzes issue title and body to suggest labels.
+  # In a real scenario, this could call an internal ML classification service.
+  # ---------------------------------------------------------------------------
+  auto-label:
+    name: "Auto-Label Issue"
+    runs-on: [self-hosted, linux]
+    if: github.event_name == 'issues' && github.event.action == 'opened' || github.event_name == 'workflow_dispatch'
+    outputs:
+      labels: ${{ steps.classify.outputs.labels }}
+      category: ${{ steps.classify.outputs.category }}
+
+    steps:
+      - name: Classify issue content
+        id: classify
+        run: |
+          echo "============================================"
+          echo "  Issue Classification Engine"
+          echo "============================================"
+          echo ""
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Demo mode — simulate an issue
+            TITLE="API returns 500 on large payloads"
+            BODY="When sending more than 1MB to POST /api/items, the server returns a 500 error. Stack trace attached."
+            echo "  [Demo Mode] Simulating issue classification"
+          else
+            TITLE="${{ github.event.issue.title }}"
+            BODY="${{ github.event.issue.body }}"
+          fi
+
+          echo "  Title: ${TITLE}"
+          echo ""
+
+          # Simple keyword-based classification
+          # In production, this could call an internal AI classification API
+          LABELS=""
+          CATEGORY="general"
+
+          # Bug detection
+          if echo "${TITLE} ${BODY}" | grep -iqE "bug|error|crash|fail|broken|500|exception|traceback"; then
+            LABELS="bug,needs-triage"
+            CATEGORY="bug"
+            echo "  Detected: Bug report"
+          fi
+
+          # Feature request detection
+          if echo "${TITLE} ${BODY}" | grep -iqE "feature|request|enhancement|add support|would be nice|proposal"; then
+            LABELS="enhancement,needs-review"
+            CATEGORY="feature"
+            echo "  Detected: Feature request"
+          fi
+
+          # Question detection
+          if echo "${TITLE} ${BODY}" | grep -iqE "how to|how do|question|help|docs|documentation|what is"; then
+            LABELS="question,needs-response"
+            CATEGORY="question"
+            echo "  Detected: Question"
+          fi
+
+          # Security detection
+          if echo "${TITLE} ${BODY}" | grep -iqE "security|vulnerability|CVE|exploit|injection|XSS|CSRF"; then
+            LABELS="security,priority-high"
+            CATEGORY="security"
+            echo "  Detected: Security issue (high priority)"
+          fi
+
+          # Default fallback
+          if [ -z "$LABELS" ]; then
+            LABELS="needs-triage"
+            CATEGORY="general"
+            echo "  Detected: General (needs manual triage)"
+          fi
+
+          echo ""
+          echo "  Labels:   ${LABELS}"
+          echo "  Category: ${CATEGORY}"
+
+          echo "labels=${LABELS}" >> "$GITHUB_OUTPUT"
+          echo "category=${CATEGORY}" >> "$GITHUB_OUTPUT"
+
+      - name: Apply labels
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "Applying labels to issue #${{ github.event.issue.number }}..."
+          echo ""
+          echo "  Labels: ${{ steps.classify.outputs.labels }}"
+          echo ""
+          echo "In production, this step would use the GitHub API:"
+          echo "  gh issue edit ${{ github.event.issue.number }} --add-label \"${{ steps.classify.outputs.labels }}\""
+          echo ""
+          echo "Labels applied successfully"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Route to Team
+  # Assigns the issue to the appropriate team based on classification.
+  # Demonstrates how automation can enforce routing rules consistently.
+  # ---------------------------------------------------------------------------
+  route-to-team:
+    name: "Route to Team"
+    runs-on: [self-hosted, linux]
+    needs: auto-label
+    if: always() && needs.auto-label.result == 'success'
+
+    steps:
+      - name: Determine team assignment
+        run: |
+          CATEGORY="${{ needs.auto-label.outputs.category }}"
+
+          echo "============================================"
+          echo "  Issue Routing Engine"
+          echo "============================================"
+          echo ""
+          echo "  Category: ${CATEGORY}"
+          echo ""
+
+          # Route based on category
+          case "${CATEGORY}" in
+            bug)
+              TEAM="@app-team"
+              CHANNEL="#app-support"
+              SLA="2 business days"
+              ;;
+            feature)
+              TEAM="@product-team"
+              CHANNEL="#feature-requests"
+              SLA="5 business days"
+              ;;
+            question)
+              TEAM="@developer-relations"
+              CHANNEL="#dev-questions"
+              SLA="1 business day"
+              ;;
+            security)
+              TEAM="@security-team"
+              CHANNEL="#security-incidents"
+              SLA="4 hours"
+              ;;
+            *)
+              TEAM="@platform-team"
+              CHANNEL="#general-support"
+              SLA="3 business days"
+              ;;
+          esac
+
+          echo "  Assigned to:  ${TEAM}"
+          echo "  Slack:        ${CHANNEL}"
+          echo "  SLA:          ${SLA}"
+          echo ""
+          echo "  Routing table:"
+          echo "    bug       → @app-team         (2 business days)"
+          echo "    feature   → @product-team     (5 business days)"
+          echo "    question  → @developer-relations (1 business day)"
+          echo "    security  → @security-team    (4 hours)"
+          echo "    other     → @platform-team    (3 business days)"
+          echo ""
+          echo "Notification sent to ${CHANNEL}"
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Welcome Comment
+  # Posts a templated comment on new issues to set expectations.
+  # Demonstrates using GITHUB_STEP_SUMMARY for audit and API for interaction.
+  # ---------------------------------------------------------------------------
+  welcome-comment:
+    name: "Post Welcome Comment"
+    runs-on: [self-hosted, linux]
+    needs: [auto-label, route-to-team]
+    if: always() && needs.auto-label.result == 'success'
+
+    steps:
+      - name: Generate welcome message
+        run: |
+          CATEGORY="${{ needs.auto-label.outputs.category }}"
+
+          echo "============================================"
+          echo "  Welcome Comment Generator"
+          echo "============================================"
+          echo ""
+
+          # Category-specific guidance
+          case "${CATEGORY}" in
+            bug)
+              EXTRA="Please include steps to reproduce, expected behavior, and any relevant logs."
+              ;;
+            feature)
+              EXTRA="Please describe the use case and how this would benefit your team."
+              ;;
+            question)
+              EXTRA="Check our internal docs first: https://wiki.internal/developer-guide"
+              ;;
+            security)
+              EXTRA="This has been flagged as a security issue. The security team has been notified."
+              ;;
+            *)
+              EXTRA="A team member will review this shortly."
+              ;;
+          esac
+
+          echo "  Category: ${CATEGORY}"
+          echo ""
+          echo "  Welcome message:"
+          echo "  ───────────────────────────────────────"
+          echo "  Thanks for opening this issue!"
+          echo ""
+          echo "  This issue has been automatically categorized as: ${CATEGORY}"
+          echo "  ${EXTRA}"
+          echo ""
+          echo "  Our team will respond within the posted SLA."
+          echo "  ───────────────────────────────────────"
+
+      - name: Generate triage summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'HEADER'
+          # Issue Triage Report
+
+          HEADER
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          **Category:** \`${{ needs.auto-label.outputs.category }}\`
+          **Labels:** \`${{ needs.auto-label.outputs.labels }}\`
+          **Event:** \`${{ github.event_name }}\`
+          **Actor:** @${{ github.actor }}
+
+          ## Patterns Demonstrated
+
+          - **Event-driven triggers** — \`issues\` and \`issue_comment\` events (not push/PR)
+          - **Content analysis** — Keyword classification for auto-labeling
+          - **Routing rules** — Team assignment based on issue category
+          - **Templated responses** — Consistent communication with issue reporters
+          - **Audit trail** — Every triage decision is logged in the workflow run
+
+          ## OneFlow Connection
+
+          This pattern can be published as a reusable workflow for any team's repository.
+          Central teams maintain the triage logic; consuming repos get updates automatically.
+          EOF
